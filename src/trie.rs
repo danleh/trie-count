@@ -1,5 +1,7 @@
 
-// see also https://github.com/michaelsproul/rust_radix_trie/blob/master/examples/string_frequency.rs
+// see https://github.com/michaelsproul/rust_radix_trie/blob/master/examples/string_frequency.rs
+// and https://github.com/miedzinski/prefix-tree
+// and https://en.wikipedia.org/wiki/Radix_tree
 
 // TODO generalize over generic sequences of T, and values V (instead of str, usize)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

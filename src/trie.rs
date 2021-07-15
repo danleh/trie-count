@@ -1,17 +1,23 @@
+
 // see also https://github.com/michaelsproul/rust_radix_trie/blob/master/examples/string_frequency.rs
 
 // TODO generalize over generic sequences of T, and values V (instead of str, usize)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Trie {
+    // We use a "pseudo node" with just the empty string as prefix, which avoids duplicate code.
     root: Node,
+
+    // See `Node::try_insert`.
+    tokenize_at: Option<char>
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Node {
-    // TODO String -> Box<str>
-    prefix: String,
+    // Since the prefix cannot be grown (only when merging a node with its only child, which is
+    // currently not implemented), we can save the capacity pointer and just make this a boxed str.
+    prefix: Box<str>,
 
-    // Invariant: none of the children share a prefix
+    // Invariant: None of the children share a prefix.
     children: Vec<Node>,
 
     // TODO chache size of subtree
@@ -37,16 +43,21 @@ struct Node {
 
 impl Trie {
     pub fn new() -> Self {
-        Trie {
-            root: Node {
-                prefix: "".into(),
-                children: Vec::new(),
-            }
+        Self { 
+            root: Node::new_leaf(""),
+            tokenize_at: None,
+        }
+    }
+
+    pub fn with_split_token(token: char) -> Self {
+        Self { 
+            root: Node::new_leaf(""),
+            tokenize_at: Some(token),
         }
     }
 
     pub fn insert(&mut self, str: &str) {
-        assert!(self.root.try_insert(str));
+        assert!(self.root.try_insert(str, self.tokenize_at));
     }
 
     // TODO pub fn remove(&mut self, Node?)
@@ -137,35 +148,42 @@ impl Node {
         }
     }
 
-    fn try_insert(&mut self, str: &str) -> bool {
-        let common_prefix_len = self.prefix
-            // Iterate over aligned unicode scalar values in prefix and input.
+    fn try_insert(&mut self, str: &str, tokenize_at: Option<char>) -> bool {
+        let mut common_prefix_len = self.prefix
+            // Iterate over unicode scalar values in prefix and input in lock-step.
             .char_indices()
             .zip(str.chars())
             // Stop at the first character difference.
             .find(|((_, c1), c2)| c1 != c2)
             // Return the prefix up to the difference...
             .map(|((byte_pos, _), _)| byte_pos)
-            // ...or the whole (shorter of the two) string, if no difference was found.
+            // ...or the whole string (actually, the shorter of the two), if no difference was found.
             .unwrap_or(std::cmp::min(self.prefix.len(), str.len()));
 
-        // Do not allow merged prefixes inside "path components", so limit the split position
-        // to the rightmost '/'.
-        // FIXME hacky, iterate over "tokens" that are pre-split instead
-        let common_prefix_len = str[..common_prefix_len].rfind('/').map_or(0, |pos| pos+1);
+        // If the tokenize option is set, only allow "breaks" (i.e., split between prefix and rest)
+        // after said token. Since we already found a common prefix, we can short it to just end
+        // after the token.
+        if let Some(token) = tokenize_at {
+            common_prefix_len = str[..common_prefix_len].rfind(token).map_or(0, |pos| pos+1);
+        }
 
         let (common_prefix, rest) = str.split_at(common_prefix_len);
 
+        // Insertion case A)
         // This node is a full prefix of the input, so try to insert into one of our children.
-        if common_prefix == self.prefix {
+        if common_prefix == &self.prefix[..] {
             // FIXME test with empty insertion or "foo", "foobar", stack overflow?
             // If this node was a leaf, make it explicit by adding an "empty" child.
             // if self.is_leaf() {
             //     self.children.push(Self::new_leaf(""));
             // }
 
+            if rest.is_empty() {
+                unimplemented!("duplicate value");
+            }
+
             for child in &mut self.children {
-                if child.try_insert(rest) {
+                if child.try_insert(rest, tokenize_at) {
                     return true;
                 }
             }
@@ -173,12 +191,15 @@ impl Node {
             return true;
         }
 
+        // Insertion case B)
         // No common prefix, so cannot insert into this sub-trie.
         if common_prefix.is_empty() {
             return false;
         }
         
-        // This prefix and the input only partially overlap, so split this node into the common prefix, and a new intermediate node with the rest and current children.
+        // Insertion case C)
+        // This prefix and the input partially overlap, so split this node into the common prefix,
+        // and insert a new intermediate node with the rest and current children.
         let (_, prefix_rest) = self.prefix.split_at(common_prefix_len);
         
         let current_children = std::mem::replace(&mut self.children, Vec::new());

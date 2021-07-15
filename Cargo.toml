@@ -2,9 +2,11 @@
 name = "trie-count"
 version = "0.1.0"
 authors = ["Daniel Lehmann <mail@dlehmann.eu>"]
+description = "Organizes the input lines in a prefix tree (i.e., merging all equal prefixes into a single node) and then counts elements in the (sub-)tree(s). Useful, e.g., for quick clustering of file names."
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 main_error = "0.1.1"
+clap = "3.0.0-beta.2"

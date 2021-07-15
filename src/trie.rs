@@ -1,3 +1,5 @@
+// see also https://github.com/michaelsproul/rust_radix_trie/blob/master/examples/string_frequency.rs
+
 // TODO generalize over generic sequences of T, and values V (instead of str, usize)
 #[derive(Debug, Clone)]
 pub struct Trie {
@@ -19,6 +21,8 @@ struct Node {
     // parent: &Node,
 }
 
+// see https://users.rust-lang.org/t/is-this-code-idiomatic/51798/14
+// and https://www.hackertouch.com/longest-common-prefix-in-rust.html
 // fn longest_common_prefix<'a>(strings: &[&'a str]) -> &'a str {
 //     match strings.split_first() {
 //         Some((mut prefix, rest)) => {
@@ -46,10 +50,14 @@ impl Trie {
     }
 
     // TODO pub fn remove(&mut self, Node?)
+    // TODO merge node with child if only single child / merge node with parent if only child
 
     pub fn by_levels(&self) -> Vec<(&str, usize)> {
         let mut result = Vec::new();
-        self.root.by_levels(0, &mut result);
+        // Do not include the always empty root node prefix, so iterate over children.
+        for child in &self.root.children {
+            child.by_levels(0, &mut result);
+        }
         result
         
         // TODO imperative implementation
@@ -58,12 +66,31 @@ impl Trie {
         // unimplemented!()
     }
 
+    /// Returns (prefix, level, count).
+    pub fn by_levels_with_count(&self) -> Vec<(&str, usize, usize)> {
+        let mut result = Vec::new();
+        // Do not include the always empty root node prefix, so iterate over children.
+        for child in &self.root.children {
+            child.by_levels_with_count(0, &mut result);
+        }
+        result
+        // TODO use iterator, see below
+    }
+
+    pub fn sort_by_count(&mut self) {
+        self.root.sort_by_count()
+    }
+
+    pub fn len(&self) -> usize {
+        self.root.len()
+    }
+
     // pub fn graphviz(&self) -> String {
-    //     unimplemented!()
+    //     todo!()
     // }
 
     // fn iter(&self) -> impl Iterator<Item=&str> {
-    //     unimplemented!()
+    //     todo!()
     // }
 }
 
@@ -75,10 +102,38 @@ impl Node {
         }
     }
 
+    fn is_leaf(&self) -> bool {
+        self.children.is_empty()
+    }
+
+    // TODO make lazy iterator, not collecting into result
     fn by_levels<'a>(&'a self, level: usize, result: &mut Vec<(&'a str, usize)>) {
         result.push((&self.prefix, level));
         for child in &self.children {
             child.by_levels(level+1, result);
+        }
+    }
+
+    // TODO iterator, rename to iter_with_count()
+    fn by_levels_with_count<'a>(&'a self, level: usize, result: &mut Vec<(&'a str, usize, usize)>) {
+        result.push((&self.prefix, level, self.len()));
+        for child in &self.children {
+            child.by_levels_with_count(level+1, result);
+        }
+    }
+
+    fn len(&self) -> usize {
+        if self.is_leaf() {
+            1
+        } else {
+            self.children.iter().map(|node| node.len()).sum()
+        }
+    }
+
+    fn sort_by_count(&mut self) {
+        self.children.sort_by_cached_key(|node| std::cmp::Reverse(node.len()));
+        for child in &mut self.children {
+            child.sort_by_count();
         }
     }
 
@@ -93,10 +148,22 @@ impl Node {
             .map(|((byte_pos, _), _)| byte_pos)
             // ...or the whole (shorter of the two) string, if no difference was found.
             .unwrap_or(std::cmp::min(self.prefix.len(), str.len()));
+
+        // Do not allow merged prefixes inside "path components", so limit the split position
+        // to the rightmost '/'.
+        // FIXME hacky, iterate over "tokens" that are pre-split instead
+        let common_prefix_len = str[..common_prefix_len].rfind('/').map_or(0, |pos| pos+1);
+
         let (common_prefix, rest) = str.split_at(common_prefix_len);
 
         // This node is a full prefix of the input, so try to insert into one of our children.
         if common_prefix == self.prefix {
+            // FIXME test with empty insertion or "foo", "foobar", stack overflow?
+            // If this node was a leaf, make it explicit by adding an "empty" child.
+            // if self.is_leaf() {
+            //     self.children.push(Self::new_leaf(""));
+            // }
+
             for child in &mut self.children {
                 if child.try_insert(rest) {
                     return true;
@@ -107,7 +174,7 @@ impl Node {
         }
 
         // No common prefix, so cannot insert into this sub-trie.
-        if common_prefix_len == 0 {
+        if common_prefix.is_empty() {
             return false;
         }
         

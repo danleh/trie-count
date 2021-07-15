@@ -1,17 +1,27 @@
-const BLOCKS: [char; 9] = [' ' , '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'];
+//! Display a fraction as a horizontal bar chart with "high" resolution by using Unicode block
+//! characters.
 
-pub fn bar_str(fraction: f64, max_width: usize) -> String {
+const PARTIAL_BLOCKS: [char; 9] = [' ' , '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'];
+
+pub fn unicode_bar_str(fraction: f64, max_width: usize) -> String {
     assert!(fraction >= 0.0 && fraction <= 1.0);
-    let total_width = fraction * max_width as f64;
-    let full_width = total_width.floor();
-    let partial_width = total_width - full_width;
-    let block_index = (partial_width * BLOCKS.len() as f64).floor() as usize;
+
+    let ideal_width = fraction * max_width as f64;
+
+    let full_width = ideal_width.floor();
     let mut bar = "█".repeat(full_width as usize);
-    bar.push(BLOCKS[block_index]);
-    if let Some(rest) = max_width.checked_sub(bar.chars().count()) {
-        bar.push_str(&" ".repeat(rest));
+
+    let partial_width = ideal_width - full_width;
+    if partial_width > 0.0 {
+        let block_index = (partial_width * PARTIAL_BLOCKS.len() as f64).floor() as usize;
+        bar.push(PARTIAL_BLOCKS[block_index]);
     }
-    // FIXME some bug in total length
+
+    let empty_width = max_width - bar.chars().count();
+    for _ in 0..empty_width {
+        bar.push(' ')
+    }
+    
     assert_eq!(bar.chars().count(), max_width);
     bar
 }

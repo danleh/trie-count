@@ -1,4 +1,5 @@
-use std::io::{self, BufRead};
+use std::fs::File;
+use std::io::{self, BufRead, BufReader, BufWriter};
 use std::path::PathBuf;
 
 use main_error::MainError;
@@ -16,23 +17,32 @@ const BAR_WIDTH: usize = 20;
     author = clap::crate_authors!(),
     version = clap::crate_version!(),
     about = clap::crate_description!(),
+    setting = clap::AppSettings::DeriveDisplayOrder,
+    setting = clap::AppSettings::UnifiedHelpMessage
 )]
-/// Organizes the input lines in a prefix tree (i.e., merging all equal prefixes into a single node)
-/// and counts transitive elements in the tree. Useful
 struct Options {
     /// Input file to read lines from. [default: stdin]
-    #[clap(short, long, value_name = "file")]
+    #[clap(value_name = "file")]
     input: Option<PathBuf>,
+    
+    /// Output file to write trie to. [default: stdout]
+    #[clap(short, long, value_name = "file")]
+    output: Option<PathBuf>,
 
-    /// Split only at the given character, e.g., use '/' for splitting paths by directories and file.
+    /// Split only at the given character.
+    /// For example, pass -t'/' to build a trie of paths, splitting across directories and files.
     /// [default: split at every character]
     #[clap(short, long, value_name = "character")]
     tokenize_at: Option<char>,
 
     /// Sort the trie nodes by number of contained elements, i.e., largest subtrees come first.
-    /// [default: true]
+    /// [default: false]
     #[clap(short, long)]
     sort_by_count: bool,
+
+    /// Character(s) with which to indent levels of the tree. [default: '\t']
+    #[clap(short, long, default_value="\t", value_name="characters", hide_default_value=true)]
+    indent_with: String,
 
     /// Show a bar of percent next to the count. [default: false]
     #[clap(short, long)]
@@ -40,38 +50,52 @@ struct Options {
 }
 
 fn main() -> Result<(), MainError> {
-    // test_order();
-
     let options = Options::parse();
+    // DEBUG
     // println!("{:?}", options);
 
+    // Create empty trie.
     let mut trie = if let Some(token) = options.tokenize_at {
         Trie::with_split_token(token)
     } else  {
         Trie::new()
     };
 
-    let stdin  = io::stdin();
-    for line in stdin.lock().lines() {
+    // Read lines from input and insert intro trie.
+    let input: Box<dyn io::BufRead> = if let Some(file) = options.input {
+        Box::new(BufReader::new(File::open(file)?))
+    } else {
+        let stdin = Box::leak(Box::new(io::stdin()));
+        Box::new(stdin.lock())
+    };
+    for line in input.lines() {
         trie.insert(&line?);
     }
 
+    // Optionally sort trie by subtree sizes.
     if options.sort_by_count {
         trie.sort_by_count();
     }
+
+    // Write trie to output.
+    let mut output: Box<dyn io::Write> = if let Some(file) = options.output {
+        Box::new(BufWriter::new(File::create(file)?))
+    } else {
+        Box::new(io::stdout())
+    };
 
     let max_size_width = trie.len().to_string().len();
     let total_inv = 1.0 / trie.len() as f64;
 
     for (prefix, level, count) in trie.by_levels_with_count() {
-        let indent = "  ".repeat(level);
-        print!("{}{:<width$} ", indent, count, width=max_size_width);
+        let indent = options.indent_with.repeat(level);
+        write!(output, "{}{:<width$} ", indent, count, width=max_size_width)?;
         if options.bar {
             let total_fraction = count as f64 * total_inv;
             let bar = unicode_bar_chart::unicode_bar_str(total_fraction, BAR_WIDTH);
-            print!("{} ", bar);
+            write!(output, "{} ", bar)?;
         }
-        println!("{}", prefix);
+        writeln!(output, "{}", prefix)?;
     }
 
     Ok(())
@@ -125,8 +149,6 @@ fn test_order() {
     trie.insert("/home/daniel/wapm/yipee.wasm");
 
     print_trie(&trie);
-
-    return;
 
     println!("size: {}", trie.len());
 

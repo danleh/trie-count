@@ -2,8 +2,8 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter};
 use std::path::PathBuf;
 
-use main_error::MainError;
 use clap::Clap;
+use main_error::MainError;
 
 use crate::trie::Trie;
 
@@ -25,7 +25,7 @@ struct Options {
     /// Input file to read lines from. [default: stdin]
     #[clap(value_name = "file")]
     input: Option<PathBuf>,
-    
+
     /// Output file to write trie to. [default: stdout]
     #[clap(short, long, value_name = "file")]
     output: Option<PathBuf>,
@@ -42,7 +42,13 @@ struct Options {
     sort_by_count: bool,
 
     /// Character(s) with which to indent levels of the tree. [default: '  ']
-    #[clap(short, long, default_value="  ", value_name="characters", hide_default_value=true)]
+    #[clap(
+        short,
+        long,
+        default_value = "  ",
+        value_name = "characters",
+        hide_default_value = true
+    )]
     indent_with: String,
 
     /// Show a bar of percent next to the count. [default: false]
@@ -58,7 +64,7 @@ fn main() -> Result<(), MainError> {
     // Create empty trie.
     let mut trie = if let Some(token) = options.tokenize_at {
         Trie::with_split_token(token)
-    } else  {
+    } else {
         Trie::new()
     };
 
@@ -90,12 +96,24 @@ fn main() -> Result<(), MainError> {
 
     for (prefix, level, count) in trie.by_levels_with_count() {
         let indent = options.indent_with.repeat(level);
-        let line = format!("{}{:<width$} {}", indent, count, prefix, width=max_size_width);
+        let line = format!(
+            "{}{:<width$} {}",
+            indent,
+            count,
+            prefix,
+            width = max_size_width
+        );
         if options.bar {
             let total_fraction = count as f64 * total_inv;
             let bar = unicode_bar_chart::unicode_bar_str(total_fraction, BAR_WIDTH);
             // Put bar right of the other information, and aligned, such that total width is about 99.
-            writeln!(output, "{:width$}{}", line, bar, width=LINE_WIDTH - BAR_WIDTH)?;
+            writeln!(
+                output,
+                "{:width$}{}",
+                line,
+                bar,
+                width = LINE_WIDTH - BAR_WIDTH
+            )?;
         } else {
             writeln!(output, "{}", line)?;
         }

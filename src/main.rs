@@ -11,7 +11,7 @@ mod trie;
 mod unicode_bar_chart;
 
 const BAR_WIDTH: usize = 20;
-const LINE_WIDTH: usize = 99;
+const TARGET_MAX_LINE_WIDTH: usize = 100;
 
 #[derive(Clap, Debug)]
 #[clap(
@@ -96,24 +96,12 @@ fn main() -> Result<(), MainError> {
 
     for (prefix, level, count) in trie.by_levels_with_count() {
         let indent = options.indent_with.repeat(level);
-        let line = format!(
-            "{}{:<width$} {}",
-            indent,
-            count,
-            prefix,
-            width = max_size_width
-        );
+        let line = format!("{}{:<width$} {}", indent, count, prefix, width = max_size_width);
         if options.bar {
             let total_fraction = count as f64 * total_inv;
             let bar = unicode_bar_chart::unicode_bar_str(total_fraction, BAR_WIDTH);
-            // Put bar right of the other information, and aligned, such that total width is about 99.
-            writeln!(
-                output,
-                "{:width$}{}",
-                line,
-                bar,
-                width = LINE_WIDTH - BAR_WIDTH
-            )?;
+            // Put bar right of the other information and align such that total width is not exceeded.
+            writeln!(output, "{:width$}{}", line, bar, width = TARGET_MAX_LINE_WIDTH - BAR_WIDTH)?;
         } else {
             writeln!(output, "{}", line)?;
         }

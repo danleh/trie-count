@@ -1,67 +1,26 @@
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter};
-use std::path::PathBuf;
 
 use clap::Parser;
-use main_error::MainError;
 
 use crate::trie::Trie;
 
 mod trie;
+mod options;
 mod unicode_bar_chart;
 
 const BAR_WIDTH: usize = 20;
 const TARGET_MAX_LINE_WIDTH: usize = 100;
 
-#[derive(Parser, Debug)]
-#[clap(
-    author = clap::crate_authors!(),
-    version = clap::crate_version!(),
-    about = clap::crate_description!(),
-)]
-struct Options {
-    /// Input file to read lines from. [default: stdin]
-    // #[clap(value_name = "file")]
-    input: Option<PathBuf>,
-
-    /// Output file to write trie to. [default: stdout]
-    #[clap(short, long, value_name = "file")]
-    output: Option<PathBuf>,
-
-    /// Split only at the given character.
-    /// For example, pass -t'/' to build a trie of paths, splitting across directories and files.
-    /// [default: split at every character]
-    #[clap(short, long, value_name = "character")]
-    tokenize_at: Option<char>,
-
-    /// Sort the trie nodes by number of contained elements, i.e., largest subtrees come first.
-    /// [default: false]
-    #[clap(short, long)]
-    sort_by_count: bool,
-
-    /// Character(s) with which to indent levels of the tree. [default: '  ']
-    #[clap(
-        short,
-        long,
-        default_value = "  ",
-        value_name = "characters",
-        hide_default_value = true
-    )]
-    indent_with: String,
-
-    /// Show a bar of percent next to the count. [default: false]
-    #[clap(short, long)]
-    bar: bool,
-}
-
-fn main() -> Result<(), MainError> {
-    let options = Options::parse();
+fn main() -> anyhow::Result<()> {
+    let options = options::Options::parse();
     // DEBUG
-    // println!("{:?}", options);
+    println!("{options:#?}");
 
     // Create empty trie.
-    let mut trie = if let Some(token) = options.tokenize_at {
-        Trie::with_split_token(token)
+    // FIXME
+    let mut trie = if let Some(token) = options.split_delimiter.first() {
+        Trie::with_split_token(*token)
     } else {
         Trie::new()
     };

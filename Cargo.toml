@@ -10,8 +10,8 @@ name = "tc"
 path = "src/main.rs"
 
 [dependencies]
-main_error = "0.1.1"
 clap = { version = "4.1.4", features = ["derive", "cargo"] }
+anyhow = "1.0.69"
 
 [profile.release]
 overflow-checks = true

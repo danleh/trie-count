@@ -2,6 +2,7 @@
 
 This is a simple command line utility that takes a list of strings as input and produces a trie data structure as output.
 The trie gives a count for each prefix of the input strings.
+
 Example:
 
     $ cat input.txt
@@ -9,10 +10,37 @@ Example:
     abd
     abe
     f
+    
     $ tc input.txt
     3 ab
       1 c
       1 d
       1 e
     1 f
-    
+
+Example for paths:
+
+    $ find -type f
+    ./Cargo.toml
+    ./Cargo.lock
+    ./src/main.rs
+    ./src/options.rs
+
+    $ find -type f | tc -d'/' -s
+    4 ./
+      1 Cargo.toml
+      1 Cargo.lock
+      2 src/
+        1 main.rs
+        1 options.rs
+
+Advanced example, combining with other UNIX tools, e.g., summing words in a directory tree:
+
+    $ find -type f | xargs wc -w | head -n-1
+      42 src/main.rs
+    1337 src/options.rs
+
+    $ find -type f | xargs wc -w | head -n-1 | tc -d'/' -s
+    1379 src/
+      42   main.rs
+      1337 options.rs

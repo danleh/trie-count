@@ -4,7 +4,7 @@
 const PARTIAL_BLOCKS: [char; 9] = [' ' , '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'];
 
 pub fn unicode_bar_str(fraction: f64, max_width: usize) -> String {
-    assert!(fraction >= 0.0 && fraction <= 1.0);
+    assert!((0.0..=1.0).contains(&fraction));
 
     let ideal_width = fraction * max_width as f64;
 

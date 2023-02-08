@@ -21,7 +21,7 @@ const TARGET_MAX_LINE_WIDTH: usize = 100;
 )]
 struct Options {
     /// Input file to read lines from. [default: stdin]
-    #[clap(value_name = "file")]
+    // #[clap(value_name = "file")]
     input: Option<PathBuf>,
 
     /// Output file to write trie to. [default: stdout]
@@ -94,14 +94,14 @@ fn main() -> Result<(), MainError> {
 
     for (prefix, level, count) in trie.by_levels_with_count() {
         let indent = options.indent_with.repeat(level);
-        let line = format!("{}{:<width$} {}", indent, count, prefix, width = max_size_width);
+        let line = format!("{indent}{count:<max_size_width$} {prefix}");
         if options.bar {
             let total_fraction = count as f64 * total_inv;
             let bar = unicode_bar_chart::unicode_bar_str(total_fraction, BAR_WIDTH);
             // Put bar right of the other information and align such that total width is not exceeded.
             writeln!(output, "{:width$}{}", line, bar, width = TARGET_MAX_LINE_WIDTH - BAR_WIDTH)?;
         } else {
-            writeln!(output, "{}", line)?;
+            writeln!(output, "{line}")?;
         }
     }
 

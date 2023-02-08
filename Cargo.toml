@@ -3,7 +3,11 @@ name = "trie-count"
 version = "0.1.0"
 authors = ["Daniel Lehmann <mail@dlehmann.eu>"]
 description = "Organizes the input lines in a prefix tree (i.e., merging all equal prefixes into a single node), then counts elements in the subtrees, and outputs the tree level by level with indentation. Useful for example to quickly cluster file names or other strings and see which prefixes are most frequent."
-edition = "2018"
+edition = "2021"
+
+[[bin]]
+name = "tc"
+path = "src/main.rs"
 
 [dependencies]
 main_error = "0.1.1"

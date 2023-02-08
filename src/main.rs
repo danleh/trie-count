@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter};
 use std::path::PathBuf;
 
-use clap::Clap;
+use clap::Parser;
 use main_error::MainError;
 
 use crate::trie::Trie;
@@ -13,13 +13,11 @@ mod unicode_bar_chart;
 const BAR_WIDTH: usize = 20;
 const TARGET_MAX_LINE_WIDTH: usize = 100;
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(
     author = clap::crate_authors!(),
     version = clap::crate_version!(),
     about = clap::crate_description!(),
-    setting = clap::AppSettings::DeriveDisplayOrder,
-    setting = clap::AppSettings::UnifiedHelpMessage
 )]
 struct Options {
     /// Input file to read lines from. [default: stdin]

@@ -191,8 +191,10 @@ pub enum InsertResult<T> {
     Duplicate { old_value: T },
 }
 
-const TEST_INDENT: &'static str = "  ";
-const TEST_DELIM: &'static str = ":";
+#[cfg(test)]
+const TEST_INDENT: &str = "  ";
+#[cfg(test)]
+const TEST_DELIM: &str = ":";
 
 impl<T> Node<T> {
     pub fn new_leaf(str: &str, value: T) -> Self {
@@ -238,6 +240,7 @@ impl<T> Node<T> {
         StringKeyIter(self.iter_key_parts())
     }
 
+    #[cfg(test)]
     fn to_test_string(&self) -> String
         where T: std::fmt::Display
     {
@@ -269,6 +272,7 @@ impl<T> Node<T> {
     //     "qux":2
     //   "":3
 
+    #[cfg(test)]
     fn from_test_string(str: &str) -> Self
         where T: FromStr,
               <T as FromStr>::Err: std::fmt::Debug,
@@ -315,7 +319,7 @@ impl<T> Node<T> {
                         } else if *subtrie_level <= level {
                             break;
                         } else if *subtrie_level >= level + 2 {
-                            panic!("Found subtrie at least two levels down from parent!");
+                            panic!("missing intermediate node in trie");
                         } else {
                             unreachable!();
                         }

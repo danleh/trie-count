@@ -264,17 +264,14 @@ impl<T> Node<T> {
     //     ""
     //       "qux":1
     //       "":2
-    //         "quy":2
     //       "quz":3
     //   "test"
     //     "qux":2
     //   "":3
 
-    // line -> (level, key_part, maybe_value)
-
     fn from_test_string(str: &str) -> Self
         where T: FromStr,
-              <T as FromStr>::Err: std::fmt::Debug
+              <T as FromStr>::Err: std::fmt::Debug,
     {
         fn parse_line<T>(mut line: &str) -> (isize, &str, Option<T>)
             where
@@ -311,36 +308,24 @@ impl<T> Node<T> {
                 },
                 None => {
                     let mut children = Vec::new();
-                    for (subtrie_level, subtrie) in subtries.drain(..).rev() {
-                        children.push(subtrie);
-                        if subtrie_level - level > 1 {
+                    while let Some((subtrie_level, _)) = subtries.last() {
+                        if *subtrie_level == level + 1 {
+                            // Subtrie is child of current node at `level`.
+                            children.push(subtries.pop().unwrap().1);
+                        } else if *subtrie_level <= level {
                             break;
+                        } else if *subtrie_level >= level + 2 {
+                            panic!("Found subtrie at least two levels down from parent!");
+                        } else {
+                            unreachable!();
                         }
                     }
                     subtries.push((level, Node::Interior { key_prefix: key_part.into(), children })); 
                 },
             }
-
-            // if let None = root {
-            //     root = Some(node);
-            //     stack.push(RefCell::new(&mut root.unwrap()));
-            // } else if level_delta > 0 {
-            //     assert_eq!(level_delta, 1);
-            //     let parent1 = stack.last().unwrap();
-            //     let parent = stack.last().unwrap().borrow_mut();
-            //     match *parent {
-            //         Node::Leaf { .. } => unreachable!(),
-            //         Node::Interior { children, .. } => {
-            //             children.push(node);
-            //             // stack.push(RefCell::new(children.last_mut().unwrap()));
-            //         }
-            //     };
-            // } else {
-            //     todo!();
-            // }
         }
 
-        assert_eq!(subtries.len(), 1);
+        assert_eq!(subtries.len(), 1, "more than one root node");
         subtries.pop().unwrap().1
     }
 

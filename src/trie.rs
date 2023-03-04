@@ -13,21 +13,21 @@
 //     tokenize_at: Vec<char>
 // }
 
+use std::borrow::Cow;
+
 use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct Node<T> {
-    common_prefix: Box<str>,
-    // parent: &Node,
-    data: NodeData<T>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum NodeData<T> {
-    Leaf(T),
+enum Node<T> {
+    Leaf { 
+        key_rest: Box<str>,
+        value: T,
+    },
     Interior {
+        key_prefix: Box<str>,
         children: Vec<Node<T>>,
     },
+    // parent: &Node,
 }
 
 // struct Node {
@@ -130,29 +130,141 @@ enum InsertResult<T> {
     Duplicate { old_value: T },
 }
 
+struct TrieIter<'trie, T> {
+    // None == pop an element from the key parts stack.
+    node_stack: Vec<Option<&'trie Node<T>>>,
+    key_parts_stack: Vec<&'trie str>,
+}
+
+impl<'trie, T> Iterator for TrieIter<'trie, T> {
+    type Item = (Vec<&'trie str>, &'trie T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(cur_node) = self.node_stack.pop() {
+            match cur_node {
+                Some(Node::Leaf { key_rest, value }) => {
+                    let mut key_parts_stack = self.key_parts_stack.clone();
+                    if !key_rest.is_empty() {
+                        key_parts_stack.push(key_rest);
+                    }
+                    return Some((key_parts_stack, value));
+                },
+                Some(Node::Interior { key_prefix, children }) => {
+                    self.node_stack.push(None);
+                    self.key_parts_stack.push(key_prefix);
+                    self.node_stack.extend(children.iter().rev().map(Some));
+                },
+                None => {
+                    self.key_parts_stack.pop();
+                },
+            }
+        }
+        None
+    }
+}
+
+impl<'trie, T> TrieIter<'trie, T> {
+    fn next_lending<'iter>(&'iter mut self) -> Option<(&'iter [&'trie str], &'trie T)> {
+        while let Some(cur_node) = self.node_stack.pop() {
+            match cur_node {
+                Some(Node::Leaf { key_rest, value }) => {
+                    if !key_rest.is_empty() {
+                        self.key_parts_stack.push(key_rest);
+                        self.node_stack.push(None);
+                    }
+                    return Some((self.key_parts_stack.as_slice(), value));
+                },
+                Some(Node::Interior { key_prefix, children }) => {
+                    self.node_stack.push(None);
+                    self.key_parts_stack.push(key_prefix);
+                    self.node_stack.extend(children.iter().rev().map(Some));
+                },
+                None => {
+                    self.key_parts_stack.pop();
+                },
+            }
+        }
+        None
+    }
+}
+
+impl<'trie, T> IntoIterator for &'trie Node<T> {
+    type Item = (Vec<&'trie str>, &'trie T);
+    type IntoIter = TrieIter<'trie, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        TrieIter {
+            node_stack: vec![Some(self)],
+            key_parts_stack: Vec::new(),
+        }
+    }
+}
+
+fn test_trie() -> Node<u32> {
+    Node::Interior { 
+        key_prefix: "foo".into(), 
+        children: vec![
+            Node::Interior { 
+                key_prefix: "bar".into(), 
+                children: vec![
+                    Node::Leaf { key_rest: "".into(), value: 0 },
+                    Node::Leaf { key_rest: "qux".into(), value: 1 },
+                ],
+            },
+            Node::Leaf { key_rest: "qux".into(), value: 2 },
+            Node::Leaf { key_rest: "".into(), value: 3 },
+        ],
+    }
+}
+
+#[test]
+fn test_iter() {
+    let root = test_trie();
+    let mut iter = root.into_iter();
+    assert_eq!(iter.next(), Some((vec!["foo", "bar"], &0)));
+    assert_eq!(iter.next(), Some((vec!["foo", "bar", "qux"], &1)));
+    assert_eq!(iter.next(), Some((vec!["foo", "qux"], &2)));
+    assert_eq!(iter.next(), Some((vec!["foo"], &3)));
+    assert_eq!(iter.next(), None);
+}
+
+#[test]
+fn test_iter_lending() {
+    let root = test_trie();
+    let mut iter = root.into_iter();
+    assert_eq!(iter.next_lending(), Some((&["foo", "bar"][..], &0)));
+    assert_eq!(iter.next_lending(), Some((&["foo", "bar", "qux"][..], &1)));
+    assert_eq!(iter.next_lending(), Some((&["foo", "qux"][..], &2)));
+    assert_eq!(iter.next_lending(), Some((&["foo"][..], &3)));
+    assert_eq!(iter.next_lending(), None);
+}
+
 impl<T> Node<T> {
     fn new_leaf(str: &str, value: T) -> Self {
-        Self {
-            common_prefix: str.into(),
-            data: NodeData::Leaf(value),
+        Node::Leaf {
+            key_rest: str.into(),
+            value,
         }
     }
 
     fn common_prefix(&self) -> &str {
-        &self.common_prefix
+        match self {
+            Node::Leaf { key_rest, .. } => key_rest,
+            Node::Interior { key_prefix: key_common_prefix, .. } => key_common_prefix,
+        }
     }
 
     fn children(&self) -> impl Iterator<Item=&Node<T>> {
-        match &self.data {
-            NodeData::Leaf(_) => [].iter(),
-            NodeData::Interior { children } => children.iter(),
+        match self {
+            Node::Leaf { .. } => [].iter(),
+            Node::Interior { children, .. } => children.iter(),
         }
     }
 
     fn children_mut(&mut self) -> impl Iterator<Item=&mut Node<T>> {
-        match &mut self.data {
-            NodeData::Leaf(_) => [].iter_mut(),
-            NodeData::Interior { children } => children.iter_mut(),
+        match self {
+            Node::Leaf { .. } => [].iter_mut(),
+            Node::Interior { children, .. } => children.iter_mut(),
         }
     }
 
@@ -256,22 +368,60 @@ impl<T> Node<T> {
 //     }
 
     fn get(&self, key: &str) -> Option<&T> {
-        if key.starts_with(&self.common_prefix[..]) {
-            let key_rest = &key[self.common_prefix.len()..];
-            match &self.data {
-                NodeData::Leaf(value) if key_rest.is_empty() => return Some(value),
-                NodeData::Leaf(_) => {}
-                NodeData::Interior { children } =>
+        match self {
+            Node::Leaf { key_rest, value } =>
+                if &key_rest[..] == key {
+                    return Some(value)
+                },
+            Node::Interior { key_prefix, children } => 
+                if let Some(key_rest) = key.strip_prefix(&key_prefix[..]) {
                     for child in children {
                         if let Some(value) = child.get(key_rest) {
                             return Some(value);
                         }
                     }
-            }
+                }
         }
-
         None
     }
+
+    // fn iter(&self) -> impl Iterator<Item=(Vec<&str>, &T)> {
+    //     fn iter_internal<'this, T>(current_node: &'this Node<T>, mut key_parts_stack: Vec<&str>) -> impl Iterator<Item=(Vec<&'this str>, &'this T)> {
+    //         match current_node {
+    //             Node::Leaf { key_rest, value } => {
+    //                 key_parts_stack.push(&key_rest[..]);
+    //                 Some((key_parts_stack, value))
+    //             },
+    //             Node::Interior { key_prefix, children } => {
+    //                 key_parts_stack.push(&key_prefix[..]);
+    //                 let result = children.iter()
+    //                     .flat_map(|child| iter_internal(child, key_parts_stack.clone()));
+    //                 key_parts_stack.pop();
+    //                 result
+    //             }
+    //         }
+    //     }
+
+
+    //     let mut key_parts_stack = Vec::new();
+    //     std::iter::from_fn(move || {
+    //         match self {
+    //             Node::Leaf { key_rest, value } => {
+    //                 Some((vec![&key_rest[..]], value))
+    //             },
+    //             Node::Interior { key_prefix, children } => {
+    //                 key_parts_stack.push(&key_prefix[..]);
+    //                 for child in children {
+    //                     child.iter()
+    //                 }
+    //             }
+    //         }
+    //     })
+    // }
+
+//     fn iter_with_prefix(&self, key: &str) -> impl Iterator<Item=(&str, &T)> {
+//         todo!()
+//    }
 
     fn insert<const IS_ROOT: bool>(&mut self, key: &str, value: T /*, tokenize_at: Option<char> */) -> InsertResult<T> {
         fn split_points(s: &str) -> GraphemeIndices {
@@ -283,7 +433,7 @@ impl<T> Node<T> {
             common_prefix, 
             left_rest: self_rest,
             right_rest: key_rest
-        } = split_prefix_rest(&self.common_prefix, key, split_points);
+        } = split_prefix_rest(&self.common_prefix(), key, split_points);
 
         // No common prefix, so cannot insert into this sub-trie.
         if common_prefix.is_empty() {
@@ -291,43 +441,43 @@ impl<T> Node<T> {
             return InsertResult::NotAPrefix { value };
         }
 
-        use NodeData::*;
-        match (&mut self.data, self_rest.is_empty(), key_rest.is_empty()) {
-            (Leaf(old_value), true, true) => {
-                // The insertion is fully contained in this node, so it is a duplicate.
-                let old_value = std::mem::replace(old_value, value);
-                return InsertResult::Duplicate { old_value };
-            },
-            (Interior { children }, true, true) => {
-                children.push(Node {
-                    common_prefix: key_rest.into(),
-                    data: Leaf(value),
-                });
-                return InsertResult::Ok;
-            },
-            (Leaf(value), true, false) => {
+        // use NodeData::*;
+        // match (&mut self.data, self_rest.is_empty(), key_rest.is_empty()) {
+        //     (Leaf(old_value), true, true) => {
+        //         // The insertion is fully contained in this node, so it is a duplicate.
+        //         let old_value = std::mem::replace(old_value, value);
+        //         return InsertResult::Duplicate { old_value };
+        //     },
+        //     (Interior { children }, true, true) => {
+        //         children.push(Node {
+        //             common_prefix: key_rest.into(),
+        //             data: Leaf(value),
+        //         });
+        //         return InsertResult::Ok;
+        //     },
+        //     (Leaf(value), true, false) => {
                 
-            },
-            (Leaf(value), false, true) => {
+        //     },
+        //     (Leaf(value), false, true) => {
                 
-            },
-            (Leaf(value), false, false) => {
+        //     },
+        //     (Leaf(value), false, false) => {
                 
-            },
-            (Interior { children }, true, false) => todo!(),
-            (Interior { children }, false, true) => todo!(),
-            (Interior { children }, false, false) => todo!(),
+        //     },
+        //     (Interior { children }, true, false) => todo!(),
+        //     (Interior { children }, false, true) => todo!(),
+        //     (Interior { children }, false, false) => todo!(),
 
-            // (true, true) => {
-            //     todo!();
-            //     // The insertion is fully contained in this node, so this is a duplicate.
-            //     // let old_value = std::mem::replace(&mut self.value, value);
-            //     // return InsertResult::Duplicate { old_value };
-            // },
-            // (true, false) => todo!(),
-            // (false, true) => todo!(),
-            // (false, false) => todo!(),
-        }
+        //     // (true, true) => {
+        //     //     todo!();
+        //     //     // The insertion is fully contained in this node, so this is a duplicate.
+        //     //     // let old_value = std::mem::replace(&mut self.value, value);
+        //     //     // return InsertResult::Duplicate { old_value };
+        //     // },
+        //     // (true, false) => todo!(),
+        //     // (false, true) => todo!(),
+        //     // (false, false) => todo!(),
+        // }
 
         // // The input is already contained in this node, so we're done.
         // if to_insert_rest.is_empty() {
@@ -467,20 +617,18 @@ mod test {
     fn insert_root() {
         let mut root = Node::new_leaf("foo", 1);
         assert_matches!(root.insert::<false>("foobar", 2), InsertResult::Ok);
-        assert_eq!(root, Node {
-            common_prefix: "foo".into(),
-            data: NodeData::Interior { 
-                children: vec![
-                    Node {
-                        common_prefix: "bar".into(),
-                        data: NodeData::Leaf(2),
-                    },
-                    Node {
-                        common_prefix: "".into(),
-                        data: NodeData::Leaf(1),
-                    },
-                ]
-            }
+        assert_eq!(root, Node::Interior {
+            key_prefix: "foo".into(),
+            children: vec![
+                Node::Leaf {
+                    key_rest: "bar".into(),
+                    value: 2,
+                },
+                Node::Leaf {
+                    key_rest: "".into(),
+                    value: 1,
+                },
+            ]
         });
     }
 

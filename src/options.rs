@@ -33,6 +33,7 @@ pub struct Options {
     /// Split only at the given character(s). Can be given multiple times.
     /// For example, -d'/' -d'.' is useful to build a trie of paths, splitting only at directories and file extensions.
     /// [default: split at every character]
+    /// TODO: Make this a string, not a single character.
     #[clap(short = 'd', long, value_name = "CHAR")]
     pub split_delimiter: Vec<char>,
 
@@ -55,6 +56,7 @@ pub struct Options {
     pub bar: bool,
 
     /// Do not show subtries below an integer COUNT or that account for less than FRACTION of the total count. [default: disabled]
+    /// TODO: Or limit depth of trie.
     #[clap(short, long, value_name = "COUNT|FRACTION")]
     pub min: Option<Threshold>,
 }

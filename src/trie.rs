@@ -38,6 +38,8 @@
 //     // }
 // }
 
+use std::{str::FromStr, cell::RefCell};
+
 use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -189,6 +191,9 @@ pub enum InsertResult<T> {
     Duplicate { old_value: T },
 }
 
+const TEST_INDENT: &'static str = "  ";
+const TEST_DELIM: &'static str = ":";
+
 impl<T> Node<T> {
     pub fn new_leaf(str: &str, value: T) -> Self {
         Node::Leaf {
@@ -239,19 +244,104 @@ impl<T> Node<T> {
         use std::fmt::Write;
         let mut str_acc = String::new();
         let mut iter = self.iter_key_parts();
-        let indent = "  ";
-        let delim = ":";
         while let Some((key_parts, maybe_value)) = iter.next() {
             let level = key_parts.len() - 1;
-            str_acc.push_str(&indent.repeat(level));
+            for _ in 0..level {
+                str_acc.push_str(TEST_INDENT);
+            }
             write!(str_acc, "{:?}", key_parts.last().unwrap()).unwrap();
             if let Some(value) = maybe_value { // Leaf.
-                write!(str_acc, "{delim}{value}").unwrap();
+                write!(str_acc, "{TEST_DELIM}{value}").unwrap();
             }
             str_acc.push('\n');
         }
         str_acc.pop(); // Remove trailing newline.
         str_acc
+    }
+
+    // "foo"
+    //   "bar"
+    //     ""
+    //       "qux":1
+    //       "":2
+    //         "quy":2
+    //       "quz":3
+    //   "test"
+    //     "qux":2
+    //   "":3
+
+    // line -> (level, key_part, maybe_value)
+
+    fn from_test_string(str: &str) -> Self
+        where T: FromStr,
+              <T as FromStr>::Err: std::fmt::Debug
+    {
+        fn parse_line<T>(mut line: &str) -> (isize, &str, Option<T>)
+            where
+                T: FromStr,
+                <T as FromStr>::Err: std::fmt::Debug
+        {
+            let mut level = 0;
+            while let Some(rest) = line.strip_prefix(TEST_INDENT) {
+                line = rest;
+                level += 1;
+            }
+
+            let (key_part, value) = match line.rsplit_once(TEST_DELIM) {
+                Some((key_part, value_str)) => {
+                    let value: T = value_str.parse().unwrap();
+                    (key_part, Some(value))
+                }
+                None => (line, None),
+            };
+
+            let key = key_part.strip_prefix('"').unwrap().strip_suffix('"').unwrap();
+
+            (level, key, value)
+        }
+
+        let mut subtries = Vec::new();
+
+        for line in str.lines().rev() {
+            let (level, key_part, maybe_value) = parse_line::<T>(line);
+
+            match maybe_value {
+                Some(value) => {
+                    subtries.push((level, Node::Leaf { key_rest: key_part.into(), value }));
+                },
+                None => {
+                    let mut children = Vec::new();
+                    for (subtrie_level, subtrie) in subtries.drain(..).rev() {
+                        children.push(subtrie);
+                        if subtrie_level - level > 1 {
+                            break;
+                        }
+                    }
+                    subtries.push((level, Node::Interior { key_prefix: key_part.into(), children })); 
+                },
+            }
+
+            // if let None = root {
+            //     root = Some(node);
+            //     stack.push(RefCell::new(&mut root.unwrap()));
+            // } else if level_delta > 0 {
+            //     assert_eq!(level_delta, 1);
+            //     let parent1 = stack.last().unwrap();
+            //     let parent = stack.last().unwrap().borrow_mut();
+            //     match *parent {
+            //         Node::Leaf { .. } => unreachable!(),
+            //         Node::Interior { children, .. } => {
+            //             children.push(node);
+            //             // stack.push(RefCell::new(children.last_mut().unwrap()));
+            //         }
+            //     };
+            // } else {
+            //     todo!();
+            // }
+        }
+
+        assert_eq!(subtries.len(), 1);
+        subtries.pop().unwrap().1
     }
 
 //     // TODO make lazy iterator, not collecting into result
@@ -523,6 +613,14 @@ mod test {
     "qux":1
   "qux":2
   "":3"#;
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_from_string() {
+        let expected = test_trie();
+        let string = expected.to_test_string();
+        let actual = Node::from_test_string(&string);
         assert_eq!(actual, expected);
     }
 

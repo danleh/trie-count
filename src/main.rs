@@ -1,3 +1,5 @@
+#![feature(assert_matches)]
+
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter};
 

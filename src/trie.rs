@@ -16,16 +16,18 @@
 use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct Node {
-    // Leaf {
-    //     // common_prefix: &'arena str,
-    //     // count: usize,
-    //     // parent: &Node,
-    // },
-    // Interior {
+struct Node<T> {
     common_prefix: Box<str>,
-    children: Vec<Node>,
-    // },
+    // parent: &Node,
+    data: NodeData<T>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum NodeData<T> {
+    Leaf(T),
+    Interior {
+        children: Vec<Node<T>>,
+    },
 }
 
 // struct Node {
@@ -121,20 +123,37 @@ struct Node {
 //     // }
 // }
 
-impl Node {
-    fn new_leaf(str: &str) -> Self {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum InsertResult<T> {
+    Ok,
+    NotAPrefix { value: T },
+    Duplicate { old_value: T },
+}
+
+impl<T> Node<T> {
+    fn new_leaf(str: &str, value: T) -> Self {
         Self {
             common_prefix: str.into(),
-            children: Vec::new(),
+            data: NodeData::Leaf(value),
         }
-    }
-
-    fn is_leaf(&self) -> bool {
-        self.children.is_empty()
     }
 
     fn common_prefix(&self) -> &str {
         &self.common_prefix
+    }
+
+    fn children(&self) -> impl Iterator<Item=&Node<T>> {
+        match &self.data {
+            NodeData::Leaf(_) => [].iter(),
+            NodeData::Interior { children } => children.iter(),
+        }
+    }
+
+    fn children_mut(&mut self) -> impl Iterator<Item=&mut Node<T>> {
+        match &mut self.data {
+            NodeData::Leaf(_) => [].iter_mut(),
+            NodeData::Interior { children } => children.iter_mut(),
+        }
     }
 
 //     // TODO make lazy iterator, not collecting into result
@@ -236,15 +255,113 @@ impl Node {
 //         return true;
 //     }
 
-    fn insert(&mut self, str: &str /*, tokenize_at: Option<char> */) {
+    fn get(&self, key: &str) -> Option<&T> {
+        if key.starts_with(&self.common_prefix[..]) {
+            let key_rest = &key[self.common_prefix.len()..];
+            match &self.data {
+                NodeData::Leaf(value) if key_rest.is_empty() => return Some(value),
+                NodeData::Leaf(_) => {}
+                NodeData::Interior { children } =>
+                    for child in children {
+                        if let Some(value) = child.get(key_rest) {
+                            return Some(value);
+                        }
+                    }
+            }
+        }
+
+        None
+    }
+
+    fn insert<const IS_ROOT: bool>(&mut self, key: &str, value: T /*, tokenize_at: Option<char> */) -> InsertResult<T> {
         fn split_points(s: &str) -> GraphemeIndices {
             const IS_EXTENDED: bool = true;
             s.grapheme_indices(IS_EXTENDED)
         }
 
-        let SplitResult { common_prefix, left_rest, right_rest } = split_prefix_rest(str, &self.common_prefix, split_points);
+        let SplitResult { 
+            common_prefix, 
+            left_rest: self_rest,
+            right_rest: key_rest
+        } = split_prefix_rest(&self.common_prefix, key, split_points);
 
+        // No common prefix, so cannot insert into this sub-trie.
+        if common_prefix.is_empty() {
+            // Try again to insert at another sibling.
+            return InsertResult::NotAPrefix { value };
+        }
+
+        use NodeData::*;
+        match (&mut self.data, self_rest.is_empty(), key_rest.is_empty()) {
+            (Leaf(old_value), true, true) => {
+                // The insertion is fully contained in this node, so it is a duplicate.
+                let old_value = std::mem::replace(old_value, value);
+                return InsertResult::Duplicate { old_value };
+            },
+            (Interior { children }, true, true) => {
+                children.push(Node {
+                    common_prefix: key_rest.into(),
+                    data: Leaf(value),
+                });
+                return InsertResult::Ok;
+            },
+            (Leaf(value), true, false) => {
+                
+            },
+            (Leaf(value), false, true) => {
+                
+            },
+            (Leaf(value), false, false) => {
+                
+            },
+            (Interior { children }, true, false) => todo!(),
+            (Interior { children }, false, true) => todo!(),
+            (Interior { children }, false, false) => todo!(),
+
+            // (true, true) => {
+            //     todo!();
+            //     // The insertion is fully contained in this node, so this is a duplicate.
+            //     // let old_value = std::mem::replace(&mut self.value, value);
+            //     // return InsertResult::Duplicate { old_value };
+            // },
+            // (true, false) => todo!(),
+            // (false, true) => todo!(),
+            // (false, false) => todo!(),
+        }
+
+        // // The input is already contained in this node, so we're done.
+        // if to_insert_rest.is_empty() {
+        //     return true;
+        //     // TODO: allow for duplicates by adding a count field to the node.
+        // }
+
+        // This node is a full prefix of the input, so try to insert into one of our children.
+        // if self_rest.is_empty() {
+        //     // Try to insert into one of our children.
+        //     for child in &mut self.children {
+        //         if child.insert(to_insert_rest) {
+        //             return true;
+        //         }
+        //     }
+
+        //     // If no child accepted the insertion, add a new leaf.
+        //     self.children.push(Self::new_leaf(to_insert_rest));
+        //     return true;
+        // }
+
+        // // This node is a partial prefix of the input, so split this node
+        // // and insert a new intermediate node with the rest and current children.
+        // let new_intermediate = Self {
+        //     common_prefix: self_rest.into(),
+        //     children: std::mem::take(&mut self.children),
+        // };
+        // self.children = vec![
+        //     new_intermediate,
+        //     Self::new_leaf(to_insert_rest)
+        // ];
+        // self.common_prefix = common_prefix.into();
         
+        todo!()
     }
 
 }
@@ -256,10 +373,11 @@ struct SplitResult<'a> {
     right_rest: &'a str,
 }
 
-fn split_prefix_rest<'a, F, I>(left: &'a str, right: &'a str, split_points: F) -> SplitResult<'a>
+fn split_prefix_rest<'a, F, I, T>(left: &'a str, right: &'a str, split_points: F) -> SplitResult<'a>
 where
     F: Fn(&'a str) -> I,
-    I: Iterator<Item = (usize, &'a str)>,
+    I: Iterator<Item = (usize, T)>,
+    T: PartialEq
 {
     let left_iter = split_points(left);
     let right_iter = split_points(right);
@@ -287,62 +405,123 @@ where
     }
 }
 
-#[test]
-fn test_compare() {
-    fn split_points(s: &str) -> GraphemeIndices {
-        s.grapheme_indices(true)
-    }
-
-    let result = split_prefix_rest("", "", split_points);
-    assert_eq!(result, SplitResult {
-        common_prefix: "",
-        left_rest: "",
-        right_rest: "",
-    }, "empty strings");
-
-    let result = split_prefix_rest("foo", "foo", split_points);
-    assert_eq!(result, SplitResult {
-        common_prefix: "foo",
-        left_rest: "",
-        right_rest: "",
-    }, "equal strings");
-
-    let result = split_prefix_rest("foo", "foobar", split_points);
-    assert_eq!(result, SplitResult {
-        common_prefix: "foo",
-        left_rest: "",
-        right_rest: "bar",
-    }, "left is prefix of right");
-
-    let result = split_prefix_rest("foobar", "foo", split_points);
-    assert_eq!(result, SplitResult {
-        common_prefix: "foo",
-        left_rest: "bar",
-        right_rest: "",
-    }, "right is prefix of left");
-
-    let result = split_prefix_rest("foo", "bar", split_points);
-    assert_eq!(result, SplitResult {
-        common_prefix: "",
-        left_rest: "foo",
-        right_rest: "bar",
-    }, "no common prefix");
-}
-
 #[cfg(test)]
 mod test {
+    use std::assert_matches::assert_matches;
+
     use super::*;
 
     #[test]
-    fn no_common_prefix() {
-        let mut node = Node::new_leaf("ab");
-        node.insert("ac");
+    fn test_split_prefix_rest() {
+        let result = split_prefix_rest("", "", str::char_indices);
+        assert_eq!(result, SplitResult {
+            common_prefix: "",
+            left_rest: "",
+            right_rest: "",
+        }, "empty strings");
 
-        assert_eq!(node.common_prefix(), "a");
-        assert_eq!(node.children.len(), 2);
-        assert_eq!(node.children[0].common_prefix(), "b");
-        assert_eq!(node.children[1].common_prefix(), "c");
+        let result = split_prefix_rest("foo", "foo", str::char_indices);
+        assert_eq!(result, SplitResult {
+            common_prefix: "foo",
+            left_rest: "",
+            right_rest: "",
+        }, "equal strings");
+
+        let result = split_prefix_rest("foo", "foobar", str::char_indices);
+        assert_eq!(result, SplitResult {
+            common_prefix: "foo",
+            left_rest: "",
+            right_rest: "bar",
+        }, "left is prefix of right");
+
+        let result = split_prefix_rest("foobar", "foo", str::char_indices);
+        assert_eq!(result, SplitResult {
+            common_prefix: "foo",
+            left_rest: "bar",
+            right_rest: "",
+        }, "right is prefix of left");
+
+        let result = split_prefix_rest("foo", "bar", str::char_indices);
+        assert_eq!(result, SplitResult {
+            common_prefix: "",
+            left_rest: "foo",
+            right_rest: "bar",
+        }, "no common prefix");
+
+        let result = split_prefix_rest("foo", "föö", |s| s.grapheme_indices(true));
+        assert_eq!(result, SplitResult {
+            common_prefix: "f",
+            left_rest: "oo",
+            right_rest: "öö",
+        }, "unicode umlauts");
+
+        let result = split_prefix_rest("🇩🇪", "🇩🇪🇪🇺", |s| s.grapheme_indices(true));
+        assert_eq!(result, SplitResult {
+            common_prefix: "🇩🇪",
+            left_rest: "",
+            right_rest: "🇪🇺",
+        }, "unicode country flags");
     }
+
+    #[test]
+    fn insert_root() {
+        let mut root = Node::new_leaf("foo", 1);
+        assert_matches!(root.insert::<false>("foobar", 2), InsertResult::Ok);
+        assert_eq!(root, Node {
+            common_prefix: "foo".into(),
+            data: NodeData::Interior { 
+                children: vec![
+                    Node {
+                        common_prefix: "bar".into(),
+                        data: NodeData::Leaf(2),
+                    },
+                    Node {
+                        common_prefix: "".into(),
+                        data: NodeData::Leaf(1),
+                    },
+                ]
+            }
+        });
+    }
+
+    // #[test]
+    // fn test_insert_empty() {
+    //     let mut node = Node::new_leaf("", 0);
+    //     assert!(node.insert("foobar"));
+    //     assert_eq!(node.common_prefix(), "");
+    //     assert_eq!(node.children().count(), 1);
+    //     assert_eq!(node.children().next().unwrap().common_prefix(), "foobar");
+    // }
+
+    // #[test]
+    // fn test_insert_duplicate() {
+    //     let mut node = Node::new_leaf("foobar");
+    //     assert!(node.insert("foobar"));
+    //     assert_eq!(node.common_prefix(), "foobar");
+    //     assert!(node.children.is_empty());
+    // }
+
+    // #[test]
+    // fn test_insert_longer() {
+    //     let mut node = Node::new_leaf("foo");
+    //     assert!(node.insert("foobar"));
+    //     assert_eq!(node.common_prefix(), "foo");
+    //     assert_eq!(node.children.len(), 1);
+    //     assert_eq!(node.children[0].common_prefix(), "bar");
+    //     assert!(node.children[0].children.is_empty());
+    // }
+
+    // #[test]
+    // fn test_insert_split_shorter() {
+    //     let mut node = Node::new_leaf("foobar");
+    //     assert!(node.insert("foo"));
+    //     assert_eq!(node.common_prefix(), "foo");
+    //     assert_eq!(node.children.len(), 2);
+    //     assert_eq!(node.children[0].common_prefix(), "");
+    //     assert!(node.children[0].children.is_empty());
+    //     assert_eq!(node.children[1].common_prefix(), "bar");
+    //     assert!(node.children[1].children.is_empty());
+    // }
 
     // TODO: unicode tests: smileys, German umlauts, etc.
     // TODO: counts, duplicate entries

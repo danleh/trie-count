@@ -4,95 +4,18 @@
 // and https://en.wikipedia.org/wiki/Radix_tree
 
 // TODO generalize over generic sequences of T, and values V (instead of str, usize)
+
 // #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 // pub struct Trie {
-//     // We use a "pseudo node" with just the empty string as prefix, which avoids duplicate code.
 //     root: Node,
-
 //     // See `Node::try_insert`.
 //     tokenize_at: Vec<char>
 // }
 
-use std::borrow::Cow;
-
-use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum Node<T> {
-    Leaf { 
-        key_rest: Box<str>,
-        value: T,
-    },
-    Interior {
-        key_prefix: Box<str>,
-        children: Vec<Node<T>>,
-    },
-    // parent: &Node,
-}
-
-// struct Node {
-//     // Since the prefix cannot be grown (only when merging a node with its only child, which is
-//     // currently not implemented), we can save the capacity pointer and just make this a boxed str.
-//     common_prefix: Box<str>,
-
-//     // Invariant: None of the children share a prefix.
-//     children: Vec<Node>,
-
-//     // TODO chache size of subtree
-//     // subtree_size: usize,
-
-//     // TODO maybe:
-//     // parent: &Node,
-// }
-
-// see https://users.rust-lang.org/t/is-this-code-idiomatic/51798/14
-// and https://www.hackertouch.com/longest-common-prefix-in-rust.html
-// fn longest_common_prefix<'a>(strings: &[&'a str]) -> &'a str {
-//     match strings.split_first() {
-//         Some((mut prefix, rest)) => {
-//             for (idx, char) in prefix.char_indices() {
-                
-//             }
-//             unimplemented!()
-//         },
-//         None => "",
-//     }
-// }
-
 // impl Trie {
-//     pub fn new() -> Self {
-//         Self { 
-//             root: Node::new_leaf(""),
-//             tokenize_at: None,
-//         }
-//     }
-
-//     pub fn with_split_token(token: char) -> Self {
-//         Self { 
-//             root: Node::new_leaf(""),
-//             tokenize_at: Some(token),
-//         }
-//     }
-
-//     pub fn insert(&mut self, str: &str) {
-//         assert!(self.root.try_insert(str, self.tokenize_at));
-//     }
-
-//     // TODO pub fn remove(&mut self, Node?)
-//     // TODO merge node with child if only single child / merge node with parent if only child
 
 //     pub fn by_levels(&self) -> Vec<(&str, usize)> {
-//         let mut result = Vec::new();
-//         // Do not include the always empty root node prefix, so iterate over children.
-//         for child in &self.root.children {
-//             child.by_levels(0, &mut result);
-//         }
-//         result
-        
-//         // TODO imperative implementation
-//         // let mut level = 0;
-//         // let current = self.root;
-//         // unimplemented!()
+//         todo!()
 //     }
 
 //     /// Returns (prefix, level, count).
@@ -107,64 +30,43 @@ enum Node<T> {
 //     }
 
 //     pub fn sort_by_count(&mut self) {
-//         self.root.sort_by_count()
-//     }
-
-//     pub fn len(&self) -> usize {
-//         self.root.len()
+//         todo!()
 //     }
 
 //     // pub fn graphviz(&self) -> String {
 //     //     todo!()
 //     // }
-
-//     // fn iter(&self) -> impl Iterator<Item=&str> {
-//     //     todo!()
-//     // }
 // }
 
+use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum InsertResult<T> {
-    Ok,
-    NotAPrefix { value: T },
-    Duplicate { old_value: T },
+pub enum Node<T> {
+    Leaf { 
+        key_rest: Box<str>,
+        value: T,
+    },
+    Interior {
+        key_prefix: Box<str>,
+        children: Vec<Node<T>>,
+    },
+
+    // TODO: Potential extensions, optimizations.
+    // parent: &Node,
+    // Cache of the subtree values.
+    // subtree_size: usize,
 }
 
-struct TrieIter<'trie, T> {
+
+pub struct SliceKeyIter<'trie, T> {
+    key_parts_stack: Vec<&'trie str>,
     // None == pop an element from the key parts stack.
     node_stack: Vec<Option<&'trie Node<T>>>,
-    key_parts_stack: Vec<&'trie str>,
 }
 
-impl<'trie, T> Iterator for TrieIter<'trie, T> {
-    type Item = (Vec<&'trie str>, &'trie T);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(cur_node) = self.node_stack.pop() {
-            match cur_node {
-                Some(Node::Leaf { key_rest, value }) => {
-                    let mut key_parts_stack = self.key_parts_stack.clone();
-                    if !key_rest.is_empty() {
-                        key_parts_stack.push(key_rest);
-                    }
-                    return Some((key_parts_stack, value));
-                },
-                Some(Node::Interior { key_prefix, children }) => {
-                    self.node_stack.push(None);
-                    self.key_parts_stack.push(key_prefix);
-                    self.node_stack.extend(children.iter().rev().map(Some));
-                },
-                None => {
-                    self.key_parts_stack.pop();
-                },
-            }
-        }
-        None
-    }
-}
-
-impl<'trie, T> TrieIter<'trie, T> {
-    fn next_lending<'iter>(&'iter mut self) -> Option<(&'iter [&'trie str], &'trie T)> {
+/// Cannot implement the `Iterator` trait because it borrows from the iterator itself.
+impl<'trie, T> SliceKeyIter<'trie, T> {
+    fn next<'iter>(&'iter mut self) -> Option<(&'iter [&'trie str], &'trie T)> {
         while let Some(cur_node) = self.node_stack.pop() {
             match cur_node {
                 Some(Node::Leaf { key_rest, value }) => {
@@ -188,18 +90,27 @@ impl<'trie, T> TrieIter<'trie, T> {
     }
 }
 
-impl<'trie, T> IntoIterator for &'trie Node<T> {
-    type Item = (Vec<&'trie str>, &'trie T);
-    type IntoIter = TrieIter<'trie, T>;
+pub struct VecKeyIter<'trie, T>(SliceKeyIter<'trie, T>);
 
-    fn into_iter(self) -> Self::IntoIter {
-        TrieIter {
-            node_stack: vec![Some(self)],
-            key_parts_stack: Vec::new(),
-        }
+impl<'trie, T> Iterator for VecKeyIter<'trie, T> {
+    type Item = (Vec<&'trie str>, &'trie T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(key_parts, value)| (key_parts.to_vec(), value))
     }
 }
 
+pub struct StringKeyIter<'trie, T>(SliceKeyIter<'trie, T>);
+
+impl<'trie, T> Iterator for StringKeyIter<'trie, T> {
+    type Item = (String, &'trie T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(key_parts, value)| (key_parts.join(""), value))
+    }
+}
+
+#[cfg(test)]
 fn test_trie() -> Node<u32> {
     Node::Interior { 
         key_prefix: "foo".into(), 
@@ -218,9 +129,9 @@ fn test_trie() -> Node<u32> {
 }
 
 #[test]
-fn test_iter() {
+fn test_iter_key_parts_vec() {
     let root = test_trie();
-    let mut iter = root.into_iter();
+    let mut iter = root.iter_key_parts_vec();
     assert_eq!(iter.next(), Some((vec!["foo", "bar"], &0)));
     assert_eq!(iter.next(), Some((vec!["foo", "bar", "qux"], &1)));
     assert_eq!(iter.next(), Some((vec!["foo", "qux"], &2)));
@@ -231,41 +142,74 @@ fn test_iter() {
 #[test]
 fn test_iter_lending() {
     let root = test_trie();
-    let mut iter = root.into_iter();
-    assert_eq!(iter.next_lending(), Some((&["foo", "bar"][..], &0)));
-    assert_eq!(iter.next_lending(), Some((&["foo", "bar", "qux"][..], &1)));
-    assert_eq!(iter.next_lending(), Some((&["foo", "qux"][..], &2)));
-    assert_eq!(iter.next_lending(), Some((&["foo"][..], &3)));
-    assert_eq!(iter.next_lending(), None);
+    let mut iter = root.iter_key_parts();
+    assert_eq!(iter.next(), Some((&["foo", "bar"][..], &0)));
+    assert_eq!(iter.next(), Some((&["foo", "bar", "qux"][..], &1)));
+    assert_eq!(iter.next(), Some((&["foo", "qux"][..], &2)));
+    assert_eq!(iter.next(), Some((&["foo"][..], &3)));
+    assert_eq!(iter.next(), None);
+}
+
+#[test]
+fn test_iter_key_string() {
+    let root = test_trie();
+    let mut iter = root.iter_key_string();
+    assert_eq!(iter.next(), Some(("foobar".into(), &0)));
+    assert_eq!(iter.next(), Some(("foobarqux".into(), &1)));
+    assert_eq!(iter.next(), Some(("fooqux".into(), &2)));
+    assert_eq!(iter.next(), Some(("foo".into(), &3)));
+    assert_eq!(iter.next(), None);
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum InsertResult<T> {
+    Ok,
+    NotAPrefix { value: T },
+    Duplicate { old_value: T },
 }
 
 impl<T> Node<T> {
-    fn new_leaf(str: &str, value: T) -> Self {
+    pub fn new_leaf(str: &str, value: T) -> Self {
         Node::Leaf {
             key_rest: str.into(),
             value,
         }
     }
 
-    fn common_prefix(&self) -> &str {
+    pub fn common_prefix(&self) -> &str {
         match self {
             Node::Leaf { key_rest, .. } => key_rest,
             Node::Interior { key_prefix: key_common_prefix, .. } => key_common_prefix,
         }
     }
 
-    fn children(&self) -> impl Iterator<Item=&Node<T>> {
+    pub fn children(&self) -> impl Iterator<Item=&Node<T>> {
         match self {
             Node::Leaf { .. } => [].iter(),
             Node::Interior { children, .. } => children.iter(),
         }
     }
 
-    fn children_mut(&mut self) -> impl Iterator<Item=&mut Node<T>> {
+    pub fn children_mut(&mut self) -> impl Iterator<Item=&mut Node<T>> {
         match self {
             Node::Leaf { .. } => [].iter_mut(),
             Node::Interior { children, .. } => children.iter_mut(),
         }
+    }
+
+    pub fn iter_key_parts(&self) -> SliceKeyIter<T> {
+        SliceKeyIter {
+            key_parts_stack: vec![],
+            node_stack: vec![Some(self)],
+        }
+    }
+
+    pub fn iter_key_parts_vec(&self) -> VecKeyIter<T> {
+        VecKeyIter(self.iter_key_parts())
+    }
+
+    pub fn iter_key_string(&self) -> StringKeyIter<T> {
+        StringKeyIter(self.iter_key_parts())
     }
 
 //     // TODO make lazy iterator, not collecting into result
@@ -384,40 +328,6 @@ impl<T> Node<T> {
         }
         None
     }
-
-    // fn iter(&self) -> impl Iterator<Item=(Vec<&str>, &T)> {
-    //     fn iter_internal<'this, T>(current_node: &'this Node<T>, mut key_parts_stack: Vec<&str>) -> impl Iterator<Item=(Vec<&'this str>, &'this T)> {
-    //         match current_node {
-    //             Node::Leaf { key_rest, value } => {
-    //                 key_parts_stack.push(&key_rest[..]);
-    //                 Some((key_parts_stack, value))
-    //             },
-    //             Node::Interior { key_prefix, children } => {
-    //                 key_parts_stack.push(&key_prefix[..]);
-    //                 let result = children.iter()
-    //                     .flat_map(|child| iter_internal(child, key_parts_stack.clone()));
-    //                 key_parts_stack.pop();
-    //                 result
-    //             }
-    //         }
-    //     }
-
-
-    //     let mut key_parts_stack = Vec::new();
-    //     std::iter::from_fn(move || {
-    //         match self {
-    //             Node::Leaf { key_rest, value } => {
-    //                 Some((vec![&key_rest[..]], value))
-    //             },
-    //             Node::Interior { key_prefix, children } => {
-    //                 key_parts_stack.push(&key_prefix[..]);
-    //                 for child in children {
-    //                     child.iter()
-    //                 }
-    //             }
-    //         }
-    //     })
-    // }
 
 //     fn iter_with_prefix(&self, key: &str) -> impl Iterator<Item=(&str, &T)> {
 //         todo!()

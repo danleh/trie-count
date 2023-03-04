@@ -7,9 +7,10 @@ use clap::Parser;
 
 // use crate::trie::Trie;
 
-mod trie;
 mod options;
 mod unicode_bar_chart;
+
+pub mod trie;
 
 const BAR_WIDTH: usize = 20;
 const TARGET_MAX_LINE_WIDTH: usize = 100;

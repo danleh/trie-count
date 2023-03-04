@@ -28,11 +28,11 @@ Example for paths:
 
     $ find -type f | tc -d'/' -s
     4 ./
-      1 Cargo.toml
-      1 Cargo.lock
       2 src/
         1 main.rs
         1 options.rs
+      1 Cargo.toml
+      1 Cargo.lock
 
 Advanced example, combining with other UNIX tools, e.g., summing words in a directory tree:
 
@@ -42,5 +42,5 @@ Advanced example, combining with other UNIX tools, e.g., summing words in a dire
 
     $ find -type f | xargs wc -w | head -n-1 | tc -d'/' -s
     1379 src/
-      42   main.rs
       1337 options.rs
+      42   main.rs

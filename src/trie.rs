@@ -38,7 +38,7 @@
 //     // }
 // }
 
-use std::{str::FromStr, cell::RefCell};
+use std::{str::FromStr, cell::RefCell, hint::unreachable_unchecked};
 
 use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 
@@ -67,26 +67,128 @@ pub struct SliceKeyIter<'trie, T> {
     node_stack: Vec<Option<&'trie Node<T>>>,
 }
 
+trait TrieIterator<T> {
+    const WITH_KEYS: bool;
+    type Key;
+    fn key(key_parts: &[&str]) -> Self::Key;
+
+    const WITH_INTERIOR: bool;
+    type Value;
+    fn interior() -> Self::Value;
+    fn value(value: &T) -> Self::Value;
+
+    fn next<'trie>(&mut self) -> Option<(Self::Key, Self::Value)>;
+}
+
+trait KeyRepr<'trie> {
+    const WITH_KEYS: bool;
+    fn key(key_parts: &[&'trie str]) -> Self;
+}
+
+impl<'trie> KeyRepr<'trie> for () {
+    const WITH_KEYS: bool = false;
+    fn key(_: &[&str]) -> Self {}
+}
+
+impl<'trie> KeyRepr<'trie> for Vec<&'trie str> {
+    const WITH_KEYS: bool = true;
+    fn key(key_parts: &[&'trie str]) -> Self {
+        key_parts.to_vec()
+    }
+}
+
+impl<'trie, 'iter: 'trie> KeyRepr<'trie> for &'iter [&'trie str] {
+    const WITH_KEYS: bool = true;
+    fn key(key_parts: &'iter [&'trie str]) -> Self {
+        key_parts
+    }
+}
+
+impl<'trie> KeyRepr<'trie> for String {
+    const WITH_KEYS: bool = true;
+    fn key(key_parts: &[&str]) -> Self {
+        key_parts.join("")
+    }
+}
+
+trait ValueRepr<'trie, T>
+where
+    Self: 'trie,
+{
+    const WITH_INTERIOR: bool;
+    fn interior() -> Self;
+    fn value(value: &'trie T) -> Self;
+}
+
+impl<'trie, T> ValueRepr<'trie, T> for &'trie T
+where
+    // Self: 'trie,
+{
+    const WITH_INTERIOR: bool = false;
+    fn interior() -> Self {
+        unsafe {
+            unreachable_unchecked();
+        }
+    }
+    fn value(value: &'trie T) -> Self {
+        value
+    }
+}
+
+impl<'trie, T> ValueRepr<'trie, T> for Option<&'trie T> {
+    const WITH_INTERIOR: bool = true;
+    fn interior() -> Self {
+        None
+    }
+    fn value(value: &'trie T) -> Self {
+        Some(value)
+    }
+}
+
 /// Cannot implement the `Iterator` trait because it borrows from the iterator itself.
 impl<'trie, T> SliceKeyIter<'trie, T> {
-    // Returns `Some(value)` for leafs and `None` for interior nodes.
-    // TODO: Return a struct with field names.
-    fn next<'iter>(&'iter mut self) -> Option<(&'iter [&'trie str], Option<&'trie T>)> {
+    /// Can be configured with:
+    /// - `K` to enable/disable returning the key parts, and with which representation.
+    /// - `V` to enable/disable returning interior nodes, and with which representation.
+    fn next<'iter, K, V>(&'iter mut self) -> Option<(K, V)>
+    where
+        K: KeyRepr<'trie>,
+        V: ValueRepr<'trie, T>,
+    {
         while let Some(cur_node) = self.node_stack.pop() {
             match cur_node {
-                Some(Node::Leaf { key_rest, value }) => {
-                    self.node_stack.push(None);
-                    self.key_parts_stack.push(key_rest);
-                    return Some((self.key_parts_stack.as_slice(), Some(value)));
-                },
-                Some(Node::Interior { key_prefix, children }) => {
-                    self.node_stack.push(None);
-                    self.key_parts_stack.push(key_prefix);
-                    self.node_stack.extend(children.iter().rev().map(Some));
-                    return Some((self.key_parts_stack.as_slice(), None));
-                },
-                None => {
+                Some(node) => {
+                    if K::WITH_KEYS {
+                        // After processing of this node is finished, pop its key part again.
+                        self.node_stack.push(None);
+                    }
+                    let (key_part, value) = match node {
+                        Node::Leaf { key_rest, value } => (key_rest, Some(value)),
+                        Node::Interior { key_prefix, children } => {
+                            // Process the children next, i.e., depth-first traversal.
+                            self.node_stack.extend(children.iter().rev().map(Some));
+                            (key_prefix, None)
+                        },
+                    };
+                    if K::WITH_KEYS {
+                        self.key_parts_stack.push(key_part);
+                    }
+                    let key_repr = K::key(self.key_parts_stack.as_slice());
+                    match value {
+                        None => if V::WITH_INTERIOR {
+                            return Some((key_repr, V::interior()));
+                        }
+                        Some(value) => {
+                            return Some((key_repr, V::value(value)));
+                        }
+                    }
+                }
+                None => if K::WITH_KEYS {
                     self.key_parts_stack.pop();
+                } else {
+                    unsafe {
+                        unreachable_unchecked();
+                    }
                 },
             }
         }
@@ -100,12 +202,7 @@ impl<'trie, T> Iterator for VecKeyIter<'trie, T> {
     type Item = (Vec<&'trie str>, &'trie T);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some((key_parts, value)) = self.0.next() {
-            if let Some(value) = value {
-                return Some((key_parts.to_vec(), value));
-            }
-        }
-        None
+        self.0.next()
     }
 }
 
@@ -115,12 +212,7 @@ impl<'trie, T> Iterator for StringKeyIter<'trie, T> {
     type Item = (String, &'trie T);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some((key_parts, value)) = self.0.next() {
-            if let Some(value) = value {
-                return Some((key_parts.join(""), value));
-            }
-        }
-        None
+        self.0.next()
     }
 }
 
@@ -247,7 +339,7 @@ impl<T> Node<T> {
         use std::fmt::Write;
         let mut str_acc = String::new();
         let mut iter = self.iter_key_parts();
-        while let Some((key_parts, maybe_value)) = iter.next() {
+        while let Some((key_parts, maybe_value)) = iter.next::<true, true>() {
             let level = key_parts.len() - 1;
             for _ in 0..level {
                 str_acc.push_str(TEST_INDENT);

@@ -61,69 +61,44 @@ pub enum Node<T> {
     // TODO: Alternative design: allow interior nodes to have values.
 }
 
-pub struct SliceKeyIter<'trie, T> {
-    key_parts_stack: Vec<&'trie str>,
-    // None == pop an element from the key parts stack.
-    node_stack: Vec<Option<&'trie Node<T>>>,
-}
-
-trait TrieIterator<T> {
+trait KeyRepr<'iter, 'trie> {
     const WITH_KEYS: bool;
-    type Key;
-    fn key(key_parts: &[&str]) -> Self::Key;
-
-    const WITH_INTERIOR: bool;
-    type Value;
-    fn interior() -> Self::Value;
-    fn value(value: &T) -> Self::Value;
-
-    fn next<'trie>(&mut self) -> Option<(Self::Key, Self::Value)>;
+    fn key(key_parts: &'iter [&'trie str]) -> Self;
 }
 
-trait KeyRepr<'trie> {
-    const WITH_KEYS: bool;
-    fn key(key_parts: &[&'trie str]) -> Self;
-}
-
-impl<'trie> KeyRepr<'trie> for () {
+impl KeyRepr<'_, '_> for () {
     const WITH_KEYS: bool = false;
     fn key(_: &[&str]) -> Self {}
 }
 
-impl<'trie> KeyRepr<'trie> for Vec<&'trie str> {
-    const WITH_KEYS: bool = true;
-    fn key(key_parts: &[&'trie str]) -> Self {
-        key_parts.to_vec()
-    }
-}
-
-impl<'trie, 'iter: 'trie> KeyRepr<'trie> for &'iter [&'trie str] {
-    const WITH_KEYS: bool = true;
-    fn key(key_parts: &'iter [&'trie str]) -> Self {
-        key_parts
-    }
-}
-
-impl<'trie> KeyRepr<'trie> for String {
+impl KeyRepr<'_, '_> for String {
     const WITH_KEYS: bool = true;
     fn key(key_parts: &[&str]) -> Self {
         key_parts.join("")
     }
 }
 
-trait ValueRepr<'trie, T>
-where
-    Self: 'trie,
-{
+impl<'trie> KeyRepr<'_, 'trie> for Vec<&'trie str> {
+    const WITH_KEYS: bool = true;
+    fn key(key_parts: &[&'trie str]) -> Self {
+        key_parts.to_vec()
+    }
+}
+
+impl<'iter, 'trie> KeyRepr<'iter, 'trie> for &'iter [&'trie str] {
+    const WITH_KEYS: bool = true;
+    fn key(key_parts: &'iter [&'trie str]) -> Self {
+        key_parts
+    }
+}
+
+trait ValueRepr<'trie, T> {
     const WITH_INTERIOR: bool;
     fn interior() -> Self;
     fn value(value: &'trie T) -> Self;
 }
 
-impl<'trie, T> ValueRepr<'trie, T> for &'trie T
-where
-    // Self: 'trie,
-{
+impl<'trie, T> ValueRepr<'trie, T> for &'trie T {
     const WITH_INTERIOR: bool = false;
     fn interior() -> Self {
         unsafe {
@@ -145,14 +120,22 @@ impl<'trie, T> ValueRepr<'trie, T> for Option<&'trie T> {
     }
 }
 
-/// Cannot implement the `Iterator` trait because it borrows from the iterator itself.
-impl<'trie, T> SliceKeyIter<'trie, T> {
+// TODO can this even be generic over owning vs ref vs ref_mut?
+
+pub struct Iter<'trie, T> {
+    key_parts_stack: Vec<&'trie str>,
+    // None == pop an element from the key parts stack.
+    node_stack: Vec<Option<&'trie Node<T>>>,
+}
+
+/// Cannot implement the `Iterator` trait because `next` (potentially) borrows from the iterator itself.
+impl<'trie, T> Iter<'trie, T> {
     /// Can be configured with:
     /// - `K` to enable/disable returning the key parts, and with which representation.
     /// - `V` to enable/disable returning interior nodes, and with which representation.
     fn next<'iter, K, V>(&'iter mut self) -> Option<(K, V)>
     where
-        K: KeyRepr<'trie>,
+        K: KeyRepr<'iter, 'trie>,
         V: ValueRepr<'trie, T>,
     {
         while let Some(cur_node) = self.node_stack.pop() {
@@ -163,23 +146,24 @@ impl<'trie, T> SliceKeyIter<'trie, T> {
                         self.node_stack.push(None);
                     }
                     let (key_part, value) = match node {
-                        Node::Leaf { key_rest, value } => (key_rest, Some(value)),
+                        Node::Leaf { key_rest, value } => (&key_rest[..], Some(value)),
                         Node::Interior { key_prefix, children } => {
                             // Process the children next, i.e., depth-first traversal.
                             self.node_stack.extend(children.iter().rev().map(Some));
-                            (key_prefix, None)
+                            (&key_prefix[..], None)
                         },
                     };
                     if K::WITH_KEYS {
                         self.key_parts_stack.push(key_part);
                     }
-                    let key_repr = K::key(self.key_parts_stack.as_slice());
                     match value {
                         None => if V::WITH_INTERIOR {
-                            return Some((key_repr, V::interior()));
-                        }
+                            let key_parts = self.key_parts_stack.as_slice();
+                            return Some((K::key(key_parts), V::interior()));
+                        },
                         Some(value) => {
-                            return Some((key_repr, V::value(value)));
+                            let key_parts = self.key_parts_stack.as_slice();
+                            return Some((K::key(key_parts), V::value(value)));
                         }
                     }
                 }
@@ -196,7 +180,15 @@ impl<'trie, T> SliceKeyIter<'trie, T> {
     }
 }
 
-pub struct VecKeyIter<'trie, T>(SliceKeyIter<'trie, T>);
+pub fn only_values(node: &Node<i32>) -> impl Iterator<Item = &i32> {
+    let mut iter = Iter {
+        key_parts_stack: Vec::new(),
+        node_stack: vec![Some(node)],
+    };
+    std::iter::from_fn(move || iter.next::<(), &i32>().map(|((), value)| value))
+}
+
+pub struct VecKeyIter<'trie, T>(Iter<'trie, T>);
 
 impl<'trie, T> Iterator for VecKeyIter<'trie, T> {
     type Item = (Vec<&'trie str>, &'trie T);
@@ -206,7 +198,7 @@ impl<'trie, T> Iterator for VecKeyIter<'trie, T> {
     }
 }
 
-pub struct StringKeyIter<'trie, T>(SliceKeyIter<'trie, T>);
+pub struct StringKeyIter<'trie, T>(Iter<'trie, T>);
 
 impl<'trie, T> Iterator for StringKeyIter<'trie, T> {
     type Item = (String, &'trie T);
@@ -317,8 +309,8 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn iter_key_parts(&self) -> SliceKeyIter<T> {
-        SliceKeyIter {
+    pub fn iter_key_parts(&self) -> Iter<T> {
+        Iter {
             key_parts_stack: vec![],
             node_stack: vec![Some(self)],
         }
@@ -339,7 +331,7 @@ impl<T> Node<T> {
         use std::fmt::Write;
         let mut str_acc = String::new();
         let mut iter = self.iter_key_parts();
-        while let Some((key_parts, maybe_value)) = iter.next::<true, true>() {
+        while let Some((key_parts, maybe_value)) = iter.next::<&[&str], Option<&T>>() {
             let level = key_parts.len() - 1;
             for _ in 0..level {
                 str_acc.push_str(TEST_INDENT);

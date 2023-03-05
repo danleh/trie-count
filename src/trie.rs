@@ -38,7 +38,7 @@
 //     // }
 // }
 
-use std::{str::FromStr, cell::RefCell, hint::unreachable_unchecked};
+use std::{str::FromStr, cell::RefCell, hint::unreachable_unchecked, ops::Generator, mem::MaybeUninit};
 
 use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 
@@ -102,7 +102,7 @@ impl<'trie, T> ValueRepr<'trie, T> for &'trie T {
     const WITH_INTERIOR: bool = false;
     fn interior() -> Self {
         unsafe {
-            unreachable_unchecked();
+            unreachable_unchecked()
         }
     }
     fn value(value: &'trie T) -> Self {
@@ -123,8 +123,10 @@ impl<'trie, T> ValueRepr<'trie, T> for Option<&'trie T> {
 // TODO can this even be generic over owning vs ref vs ref_mut?
 
 pub struct Iter<'trie, T> {
+    // The parts of the current key, as encountered along the spine of the tree.
     key_parts_stack: Vec<&'trie str>,
-    // None == pop an element from the key parts stack.
+    // Essentially a worklist of nodes to process.
+    // `None` is used to pop the last element from the `key_parts_stack`.
     node_stack: Vec<Option<&'trie Node<T>>>,
 }
 
@@ -140,53 +142,92 @@ impl<'trie, T> Iter<'trie, T> {
     {
         while let Some(cur_node) = self.node_stack.pop() {
             match cur_node {
-                Some(node) => {
+                Some(Node::Leaf { key_rest, value }) => {
                     if K::WITH_KEYS {
-                        // After processing of this node is finished, pop its key part again.
                         self.node_stack.push(None);
+                        self.key_parts_stack.push(key_rest);
                     }
-                    let (key_part, value) = match node {
-                        Node::Leaf { key_rest, value } => (&key_rest[..], Some(value)),
-                        Node::Interior { key_prefix, children } => {
-                            // Process the children next, i.e., depth-first traversal.
-                            self.node_stack.extend(children.iter().rev().map(Some));
-                            (&key_prefix[..], None)
-                        },
-                    };
+                    let key_parts = self.key_parts_stack.as_slice();
+                    return Some((K::key(key_parts), V::value(value)));
+                },
+                Some(Node::Interior { key_prefix, children }) => {
                     if K::WITH_KEYS {
-                        self.key_parts_stack.push(key_part);
+                        self.node_stack.push(None);
+                        self.key_parts_stack.push(key_prefix);
                     }
-                    match value {
-                        None => if V::WITH_INTERIOR {
-                            let key_parts = self.key_parts_stack.as_slice();
-                            return Some((K::key(key_parts), V::interior()));
-                        },
-                        Some(value) => {
-                            let key_parts = self.key_parts_stack.as_slice();
-                            return Some((K::key(key_parts), V::value(value)));
+                    // Process the children next, i.e., depth-first traversal.
+                    self.node_stack.extend(children.iter().rev().map(Some));
+                    if V::WITH_INTERIOR {
+                        let key_parts = self.key_parts_stack.as_slice();
+                        return Some((K::key(key_parts), V::interior()));
+                    }
+                },
+                None => {
+                    if K::WITH_KEYS {
+                        self.key_parts_stack.pop();
+                    } else {
+                        unsafe {
+                            unreachable_unchecked();
                         }
                     }
                 }
-                None => if K::WITH_KEYS {
-                    self.key_parts_stack.pop();
-                } else {
-                    unsafe {
-                        unreachable_unchecked();
-                    }
-                },
             }
         }
         None
     }
 }
 
-pub fn only_values(node: &Node<i32>) -> impl Iterator<Item = &i32> {
-    let mut iter = Iter {
-        key_parts_stack: Vec::new(),
-        node_stack: vec![Some(node)],
-    };
-    std::iter::from_fn(move || iter.next::<(), &i32>().map(|((), value)| value))
+#[inline(never)]
+pub fn external_iter_value(node: &Node<i32>) -> impl Iterator<Item=&i32> {
+    let mut stack: [MaybeUninit<&Node<i32>>; 1024] = unsafe { MaybeUninit::uninit().assume_init() };
+    let mut len = 0;
+    unsafe { stack.get_unchecked_mut(len).write(node); }
+    len += 1;
+    std::iter::from_fn(move || {
+        while len > 0 {
+            len -= 1;
+            let cur_node = unsafe { stack.get_unchecked(len).assume_init() };
+            match cur_node {
+                Node::Leaf { value, .. } => return Some(value),
+                Node::Interior { children, .. } => {
+                    for child in children.iter().rev() {
+                        len += 1;
+                        unsafe { stack.get_unchecked_mut(len).write(child); }
+                    }
+                }
+            }
+        }
+        None
+    })
 }
+
+#[inline(never)]
+pub fn internal_iter_value(node: &Node<i32>, mut f: impl FnMut(&i32)) {
+    fn internal_iter_value(node: &Node<i32>, f: &mut impl FnMut(&i32)) {
+        match node {
+            Node::Leaf { value, .. } => f(value),
+            Node::Interior { children, .. } => {
+                for child in children {
+                    internal_iter_value(child, f);
+                }
+            }
+        }
+    }
+    internal_iter_value(node, &mut f)
+}
+
+// pub fn generator_iter_value(node: &Node<i32>) {
+//     let mut generator = || {
+//         match node {
+//             Node::Leaf { value, .. } => yield value,
+//             Node::Interior { children, .. } => {
+//                 for child in children {
+//                     yield child;
+//                 }
+//             }
+//         }
+//     }
+// }
 
 pub struct VecKeyIter<'trie, T>(Iter<'trie, T>);
 

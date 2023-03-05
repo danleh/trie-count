@@ -10,10 +10,11 @@ name = "tc"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.1.4", features = ["derive", "cargo"] }
+clap = { version = "4.1.8", features = ["derive", "cargo"] }
 anyhow = "1.0.69"
 unicode-segmentation = "1.10.1"
 
 [profile.release]
-overflow-checks = true
+# overflow-checks = true
+overflow-checks = false
 lto = true

@@ -1,6 +1,9 @@
 #![feature(assert_matches)]
+#![feature(new_uninit)]
+#![feature(generators, generator_trait)]
 
 use std::fs::File;
+use std::hint::black_box;
 use std::io::{self, BufRead, BufReader, BufWriter};
 
 use clap::Parser;
@@ -66,6 +69,21 @@ fn main() -> anyhow::Result<()> {
     //         writeln!(output, "{line}")?;
     //     }
     // }
+
+    let root = trie::Node::new_leaf("bla", 1);
+
+    let mut iter = trie::external_iter_value(&root);
+    #[inline(never)]
+    fn next<'iter, 'data>(iter: &'iter mut impl Iterator<Item = &'data i32>) -> Option<&'data i32> {
+        iter.next()
+    }
+    println!("{:?}", next(&mut iter));
+
+    #[inline(never)]
+    fn p(value: i32) {
+        println!("{}", value);
+    }
+    trie::internal_iter_value(&root, |value| p(*value));
 
     Ok(())
 }

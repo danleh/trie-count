@@ -66,11 +66,13 @@ trait KeyRepr<'iter, 'trie> {
     fn key(key_parts: &'iter [&'trie str]) -> Self;
 }
 
+/// Implementation for not tracking/returning the key at all.
 impl KeyRepr<'_, '_> for () {
     const WITH_KEYS: bool = false;
     fn key(_: &[&str]) -> Self {}
 }
 
+/// Implementation for returning the key as a `String`.
 impl KeyRepr<'_, '_> for String {
     const WITH_KEYS: bool = true;
     fn key(key_parts: &[&str]) -> Self {
@@ -78,6 +80,7 @@ impl KeyRepr<'_, '_> for String {
     }
 }
 
+/// Implementation for returning the key as a `Vec` of `&str` parts.
 impl<'trie> KeyRepr<'_, 'trie> for Vec<&'trie str> {
     const WITH_KEYS: bool = true;
     fn key(key_parts: &[&'trie str]) -> Self {
@@ -85,6 +88,9 @@ impl<'trie> KeyRepr<'_, 'trie> for Vec<&'trie str> {
     }
 }
 
+/// Implementation for returning the key as a `&[&str]` slice.
+/// This is the most efficient key representation, since it avoids copying the 
+/// key parts and does not require a heap allocation for each key.
 impl<'iter, 'trie> KeyRepr<'iter, 'trie> for &'iter [&'trie str] {
     const WITH_KEYS: bool = true;
     fn key(key_parts: &'iter [&'trie str]) -> Self {
@@ -98,6 +104,7 @@ trait ValueRepr<'trie, T> {
     fn value(value: &'trie T) -> Self;
 }
 
+/// Implementation for only iterating over leaf nodes (which always have a value).
 impl<'trie, T> ValueRepr<'trie, T> for &'trie T {
     const WITH_INTERIOR: bool = false;
     fn interior() -> Self {
@@ -110,6 +117,7 @@ impl<'trie, T> ValueRepr<'trie, T> for &'trie T {
     }
 }
 
+/// Implementation for iterating over all nodes, including interior nodes.
 impl<'trie, T> ValueRepr<'trie, T> for Option<&'trie T> {
     const WITH_INTERIOR: bool = true;
     fn interior() -> Self {
@@ -126,11 +134,13 @@ pub struct Iter<'trie, T> {
     // The parts of the current key, as encountered along the spine of the tree.
     key_parts_stack: Vec<&'trie str>,
     // Essentially a worklist of nodes to process.
-    // `None` is used to pop the last element from the `key_parts_stack`.
+    // `None` is used as a marker, to indicate to pop the last element from the
+    // current `key_parts_stack`.
     node_stack: Vec<Option<&'trie Node<T>>>,
 }
 
-/// Cannot implement the `Iterator` trait because `next` (potentially) borrows from the iterator itself.
+/// Cannot implement the `Iterator` trait because `next` borrows from the iterator itself
+/// (when returning the key parts).
 impl<'trie, T> Iter<'trie, T> {
     /// Can be configured with:
     /// - `K` to enable/disable returning the key parts, and with which representation.
@@ -166,6 +176,7 @@ impl<'trie, T> Iter<'trie, T> {
                     if K::WITH_KEYS {
                         self.key_parts_stack.pop();
                     } else {
+                        // SAFETY: This is unreachable, since we only push `None` if `K::WITH_KEYS`.
                         unsafe {
                             unreachable_unchecked();
                         }
@@ -178,7 +189,7 @@ impl<'trie, T> Iter<'trie, T> {
 }
 
 #[inline(never)]
-pub fn external_iter_value(node: &Node<i32>) -> impl Iterator<Item=&i32> {
+pub fn external_iter_value_optimized_unsafe(node: &Node<i32>) -> impl Iterator<Item=&i32> {
     let mut stack: [MaybeUninit<&Node<i32>>; 1024] = unsafe { MaybeUninit::uninit().assume_init() };
     let mut len = 0;
     unsafe { stack.get_unchecked_mut(len).write(node); }
@@ -215,19 +226,6 @@ pub fn internal_iter_value(node: &Node<i32>, mut f: impl FnMut(&i32)) {
     }
     internal_iter_value(node, &mut f)
 }
-
-// pub fn generator_iter_value(node: &Node<i32>) {
-//     let mut generator = || {
-//         match node {
-//             Node::Leaf { value, .. } => yield value,
-//             Node::Interior { children, .. } => {
-//                 for child in children {
-//                     yield child;
-//                 }
-//             }
-//         }
-//     }
-// }
 
 pub struct VecKeyIter<'trie, T>(Iter<'trie, T>);
 
@@ -278,7 +276,7 @@ fn test_trie() -> Node<u32> {
 #[test]
 fn test_iter_key_parts_vec() {
     let root = test_trie();
-    let mut iter = root.iter_key_parts_vec();
+    let mut iter = root.external_iter_key_parts_vec();
     assert_eq!(iter.next(), Some((vec!["foo", "bar"], &0)));
     assert_eq!(iter.next(), Some((vec!["foo", "bar", "qux"], &1)));
     assert_eq!(iter.next(), Some((vec!["foo", "qux"], &2)));
@@ -301,7 +299,7 @@ fn test_iter_key_parts_vec() {
 #[test]
 fn test_iter_key_string() {
     let root = test_trie();
-    let mut iter = root.iter_key_string();
+    let mut iter = root.external_iter_key_string();
     assert_eq!(iter.next(), Some(("foobar".into(), &0)));
     assert_eq!(iter.next(), Some(("foobarqux".into(), &1)));
     assert_eq!(iter.next(), Some(("fooqux".into(), &2)));
@@ -350,19 +348,70 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn iter_key_parts(&self) -> Iter<T> {
+    pub fn internal_iter_all(&self, mut f: impl FnMut(/* key_parts */&[&str], /* value */ Option<&T>)) {
+        fn internal_iter<'trie, T>(
+            cur_node: &'trie Node<T>,
+            key_parts: &mut Vec<&'trie str>,
+            f: &mut impl FnMut(&[&'trie str], Option<&'trie T>)
+        ) {
+            match cur_node {
+                Node::Leaf { key_rest, value } => {
+                    key_parts.push(key_rest);
+                    f(key_parts.as_slice(), Some(value));
+                    key_parts.pop();
+                }
+                Node::Interior { key_prefix, children } => {
+                    key_parts.push(key_prefix);
+                    f(key_parts.as_slice(), None);
+                    for child in children {
+                        internal_iter(child, key_parts, f);
+                    }
+                    key_parts.pop();
+                }
+            }
+        }
+        internal_iter(self, &mut Vec::new(), &mut f);
+    }
+
+    pub fn internal_iter_leafs(&self, mut f: impl FnMut(/* key_parts */&[&str], /* value */ &T)) {
+        fn internal_iter<'trie, T>(
+            cur_node: &'trie Node<T>,
+            key_parts: &mut Vec<&'trie str>,
+            f: &mut impl FnMut(&[&'trie str], &'trie T)
+        ) {
+            match cur_node {
+                Node::Leaf { key_rest, value } => {
+                    key_parts.push(key_rest);
+                    f(key_parts.as_slice(), value);
+                    key_parts.pop();
+                }
+                Node::Interior { key_prefix, children } => {
+                    key_parts.push(key_prefix);
+                    for child in children {
+                        internal_iter(child, key_parts, f);
+                    }
+                    key_parts.pop();
+                }
+            }
+        }
+        internal_iter(self, &mut Vec::new(), &mut f);
+    }
+
+    pub fn external_iter_key_parts(&self) -> Iter<T> {
         Iter {
             key_parts_stack: vec![],
             node_stack: vec![Some(self)],
         }
     }
 
-    pub fn iter_key_parts_vec(&self) -> VecKeyIter<T> {
-        VecKeyIter(self.iter_key_parts())
+    // TODO: Not sure we need those two, the consumer can always just create the appropriate key type from the parts.
+
+    pub fn external_iter_key_parts_vec(&self) -> VecKeyIter<T> {
+        VecKeyIter(self.external_iter_key_parts())
     }
 
-    pub fn iter_key_string(&self) -> StringKeyIter<T> {
-        StringKeyIter(self.iter_key_parts())
+    pub fn external_iter_key_string(&self) -> StringKeyIter<T> {
+        StringKeyIter(self.external_iter_key_parts())
     }
 
     #[cfg(test)]
@@ -371,7 +420,7 @@ impl<T> Node<T> {
     {
         use std::fmt::Write;
         let mut str_acc = String::new();
-        let mut iter = self.iter_key_parts();
+        let mut iter = self.external_iter_key_parts();
         while let Some((key_parts, maybe_value)) = iter.next::<&[&str], Option<&T>>() {
             let level = key_parts.len() - 1;
             for _ in 0..level {

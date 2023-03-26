@@ -72,7 +72,7 @@ fn main() -> anyhow::Result<()> {
 
     let root = trie::Node::new_leaf("bla", 1);
 
-    let mut iter = trie::external_iter_value(&root);
+    let mut iter = trie::external_iter_value_optimized_unsafe(&root);
     #[inline(never)]
     fn next<'iter, 'data>(iter: &'iter mut impl Iterator<Item = &'data i32>) -> Option<&'data i32> {
         iter.next()

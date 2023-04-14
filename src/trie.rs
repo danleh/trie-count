@@ -143,7 +143,10 @@ impl KeyWithLifetime<'_> for () {
     type Key = ();
 }
 impl KeyStack<'_> for () {
+    #[inline(always)]
     fn push_and_get_current(&mut self, _: &str) {}
+
+    #[inline(always)]
     fn pop(&mut self) {}
 }
 
@@ -155,10 +158,13 @@ impl<'this, 'trie> KeyWithLifetime<'this> for Vec<&'trie str> {
     type Key = &'this [&'trie str];
 }
 impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
+    #[inline(always)]
     fn push_and_get_current<'temp>(&'temp mut self, key_part: &'trie str) -> <Self as KeyWithLifetime<'temp>>::Key {
         self.push(key_part);
         self.as_slice()
     }
+
+    #[inline(always)]
     fn pop(&mut self) {
         self.pop();
     }
@@ -172,9 +178,12 @@ trait Value<'trie, T> : Sized {
 
 /// Implementation for only iterating over leaf nodes (which always have a value).
 impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
+    #[inline(always)]
     fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T) {
         f(key, Some(value))
     }
+    
+    #[inline(always)]
     fn process_interior<K>(f: &mut impl FnMut(K, Self), key: K) {
         f(key, None)
     }
@@ -182,9 +191,12 @@ impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
 
 /// Implementation for iterating over all nodes, including interior nodes.
 impl<'trie, T> Value<'trie, T> for &'trie T {
+    #[inline(always)]
     fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T) {
         f(key, value)
     }
+    
+    #[inline(always)]
     fn process_interior<K>(_f: &mut impl FnMut(K, Self), _: K) {
         // Since the function `_f` is only interested in leafs, don't call it at all.
     }

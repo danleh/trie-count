@@ -129,20 +129,19 @@ impl<'trie, T> ValueRepr<'trie, T> for Option<&'trie T> {
 }
 
 /// Ultra hack, due to https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats
-trait KeyStackLifetime<'this, ImplicitBounds = &'this Self> {
+trait KeyWithLifetime<'this, ImplicitBounds = &'this Self> {
     type Key;
 }
 
-trait KeyStack<'trie> : for<'this /* where Self: 'this */> KeyStackLifetime<'this> {
-    fn push_and_get_current<'temp>(&'temp mut self, key_part: &'trie str) -> <Self as KeyStackLifetime<'temp>>::Key;
+trait KeyStack<'trie> : for<'any /* where Self: 'any */> KeyWithLifetime<'any> {
+    fn push_and_get_current<'temp>(&'temp mut self, key_part: &'trie str) -> <Self as KeyWithLifetime<'temp>>::Key;
     fn pop(&mut self);
 }
 
 /// Implementation for not tracking/returning the key at all.
-impl KeyStackLifetime<'_> for () {
+impl KeyWithLifetime<'_> for () {
     type Key = ();
 }
-
 impl KeyStack<'_> for () {
     fn push_and_get_current(&mut self, _: &str) {}
     fn pop(&mut self) {}
@@ -152,12 +151,11 @@ impl KeyStack<'_> for () {
 /// This is the most efficient key representation (if tracking keys at all),
 /// since it avoids copying the key parts and does not require a heap allocation
 /// for each key.
-impl<'this, 'trie> KeyStackLifetime<'this> for Vec<&'trie str> {
+impl<'this, 'trie> KeyWithLifetime<'this> for Vec<&'trie str> {
     type Key = &'this [&'trie str];
 }
-
 impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
-    fn push_and_get_current<'temp>(&'temp mut self, key_part: &'trie str) -> <Self as KeyStackLifetime<'temp>>::Key {
+    fn push_and_get_current<'temp>(&'temp mut self, key_part: &'trie str) -> <Self as KeyWithLifetime<'temp>>::Key {
         self.push(key_part);
         self.as_slice()
     }
@@ -165,6 +163,9 @@ impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
         self.pop();
     }
 }
+
+
+
 
 
 // TODO can this even be generic over owning vs ref vs ref_mut?
@@ -394,7 +395,7 @@ impl<T> Node<T> {
         f: &mut F)
     where
         KS: KeyStack<'trie>,
-        F: FnMut(/* key */ <KS as KeyStackLifetime<'_>>::Key, Option<&'trie T>)
+        F: for<'temp> FnMut(/* key */ <KS as KeyWithLifetime<'temp>>::Key, Option<&'trie T>)
     {
         match self {
             Node::Leaf { key_rest, value } => {

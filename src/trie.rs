@@ -205,7 +205,7 @@ where
 }
 
 #[inline(never)]
-pub fn external_iter_value_optimized_unsafe(node: &Node<i32>) -> impl Iterator<Item=&i32> {
+pub fn external_iter_value_unsafe(node: &Node<i32>) -> impl Iterator<Item=&i32> {
     let mut stack: [MaybeUninit<&Node<i32>>; 1024] = unsafe { MaybeUninit::uninit().assume_init() };
     let mut len = 0;
     unsafe { stack.get_unchecked_mut(len).write(node); }

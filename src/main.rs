@@ -75,48 +75,45 @@ fn main() -> anyhow::Result<()> {
     //     }
     // }
 
-    let root = trie::Node::new_leaf("bla", 1);
-
-    let mut iter = trie::external_iter_value_optimized_unsafe(&root);
-    #[inline(never)]
-    fn next<'iter, 'data>(iter: &'iter mut impl Iterator<Item = &'data i32>) -> Option<&'data i32> {
-        iter.next()
-    }
-    println!("{:?}", next(&mut iter));
-
-    #[inline(never)]
-    fn p(value: i32) {
-        println!("{value}");
-    }
-    trie::internal_iter_value(&root, |value| p(*value));
-
     let root = trie::Node::from_test_string(r#""foo"
   "bar"
     "":0
     "qux":1
   "qux":2
   "":3"#);
-    let sum = test_internal_iterator_specialization(&root);
+    let sum = test_internal_iter_values(&root);
     println!("{sum}");
 
-    let sum2 = test_external_iterator_specialization(&root);
+    let sum2 = test_external_iter_values(&root);
     println!("{sum2}");
+
+    let sum3 = test_external_iter_values_unsafe(&root);
+    println!("{sum3}");
 
     Ok(())
 }
 
 #[inline(never)]
-fn test_internal_iterator_specialization(root: &trie::Node<i32>) -> i32 {
+fn test_internal_iter_values(root: &trie::Node<i32>) -> i32 {
     let mut sum = 0;
     root.internal_iter_values(|_value| sum += 17);
     sum
 }
 
 #[inline(never)]
-fn test_external_iterator_specialization(root: &trie::Node<i32>) -> i32 {
+fn test_external_iter_values(root: &trie::Node<i32>) -> i32 {
     let mut sum = 0;
     let mut iter = root.external_iter_values();
     while let Some((_key, _value)) = iter.next() {
+        sum += 17;
+    }
+    sum
+}
+
+#[inline(never)]
+fn test_external_iter_values_unsafe(root: &trie::Node<i32>) -> i32 {
+    let mut sum = 0;
+    for _value in trie::external_iter_value_unsafe(root) {
         sum += 17;
     }
     sum

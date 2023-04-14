@@ -128,7 +128,23 @@ impl<'trie, T> ValueRepr<'trie, T> for Option<&'trie T> {
     }
 }
 
-/// Ultra hack, due to https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats
+// The `KeyStack` is essentially a lending iterator, because it returns a key representation
+// that can borrow not only from the trie, but also from the key stack itself.
+// I want to make this a trait, such that I can have multiple implementations, e.g., one where
+// the keys are not tracked at all (essentially nops, compiled away), and one where they are.
+// Unfortunately, this requires GATs (generic associated types), which even after stabilization
+// suffer from a serious compiler bug/limitation, namely that lifetime-GATs lead to an inferred
+// 'static bound for the closure type in the implementations below :(.
+// See https://blog.rust-lang.org/2022/10/28/gats-stabilization.html#implied-static-requirement-from-higher-ranked-trait-bounds
+// Hence, we rely on an encoding/polyfill of lifetime-GATs that work even before Rust 1.65
+// which actually do NOT suffer from this limitation!
+// See https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats
+// and https://github.com/danielhenrymantilla/nougat.rs.
+// I didn't want to  to include a whole dependency (nougat.rs) just for essentially two lines of
+// code (the additional trait and weird default type parameter), so I used the method described
+// by Sabrina Jewson. Great work and thanks to her for sharing this!
+// This trait is just to avoid duplicated implementations, so I did not use the sealed bounds
+// variant that she describes as well, since it adds even more complexity.
 trait KeyWithLifetime<'this, ImplicitBounds = &'this Self> {
     type Key;
 }
@@ -151,9 +167,8 @@ impl KeyStack<'_> for () {
 }
 
 /// Implementation for returning the key as a `&[&str]` slice.
-/// This is the most efficient key representation (if tracking keys at all),
-/// since it avoids copying the key parts and does not require a heap allocation
-/// for each key.
+/// This is the most efficient key representation (if tracking keys at all), since it avoids copying
+/// the key parts and does not require a heap allocation for each key/iteration.
 impl<'this, 'trie> KeyWithLifetime<'this> for Vec<&'trie str> {
     type Key = &'this [&'trie str];
 }
@@ -170,13 +185,26 @@ impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
     }
 }
 
-
+/// Trait for processing values, either both leafs and interior nodes, or only leafs.
 trait Value<'trie, T> : Sized {
     fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T);
     fn process_interior<K>(f: &mut impl FnMut(K, Self), key: K);
 }
 
 /// Implementation for only iterating over leaf nodes (which always have a value).
+impl<'trie, T> Value<'trie, T> for &'trie T {
+    #[inline(always)]
+    fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T) {
+        f(key, value)
+    }
+    
+    #[inline(always)]
+    fn process_interior<K>(_f: &mut impl FnMut(K, Self), _: K) {
+        // Since the function `_f` is only interested in leafs, don't call it at all.
+    }
+}
+
+/// Implementation for iterating over all nodes, including interior nodes (which are `None`).
 impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
     #[inline(always)]
     fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T) {
@@ -189,18 +217,6 @@ impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
     }
 }
 
-/// Implementation for iterating over all nodes, including interior nodes.
-impl<'trie, T> Value<'trie, T> for &'trie T {
-    #[inline(always)]
-    fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T) {
-        f(key, value)
-    }
-    
-    #[inline(always)]
-    fn process_interior<K>(_f: &mut impl FnMut(K, Self), _: K) {
-        // Since the function `_f` is only interested in leafs, don't call it at all.
-    }
-}
 
 
 pub struct Iter<'trie, T> {
@@ -421,7 +437,9 @@ impl<T> Node<T> {
         }
     }
 
-    /// Depth-first traversal of the trie, including interior nodes, and with returning key parts.
+    /// Generic depth-first traversal of the trie, configurable by:
+    /// - `K` whether to track keys or not.
+    /// to 
     fn internal_iter_generic<'trie, K, V, F>(
         &'trie self,
         key_parts_stack: &mut K,

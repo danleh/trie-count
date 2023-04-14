@@ -165,10 +165,31 @@ impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
 }
 
 
+trait Value<'trie, T> : Sized {
+    fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T);
+    fn process_interior<K>(f: &mut impl FnMut(K, Self), key: K);
+}
 
+/// Implementation for only iterating over leaf nodes (which always have a value).
+impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
+    fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T) {
+        f(key, Some(value))
+    }
+    fn process_interior<K>(f: &mut impl FnMut(K, Self), key: K) {
+        f(key, None)
+    }
+}
 
+/// Implementation for iterating over all nodes, including interior nodes.
+impl<'trie, T> Value<'trie, T> for &'trie T {
+    fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T) {
+        f(key, value)
+    }
+    fn process_interior<K>(_f: &mut impl FnMut(K, Self), _: K) {
+        // Since the function `_f` is only interested in leafs, don't call it at all.
+    }
+}
 
-// TODO can this even be generic over owning vs ref vs ref_mut?
 
 pub struct Iter<'trie, T> {
     // The parts of the current key, as encountered along the spine of the tree.
@@ -389,23 +410,25 @@ impl<T> Node<T> {
     }
 
     /// Depth-first traversal of the trie, including interior nodes, and with returning key parts.
-    fn internal_iter_generic<'trie, KS, F>(
+    fn internal_iter_generic<'trie, KPS, V, F>(
         &'trie self,
-        key_parts_stack: &mut KS,
+        key_parts_stack: &mut KPS,
+        // TODO switch that to FnMut + Clone
         f: &mut F)
     where
-        KS: KeyStack<'trie>,
-        F: for<'temp> FnMut(/* key */ <KS as KeyWithLifetime<'temp>>::Key, Option<&'trie T>)
+        KPS: KeyStack<'trie>,
+        V: Value<'trie, T>,
+        F: for<'temp> FnMut(<KPS as KeyWithLifetime<'temp>>::Key, V)
     {
         match self {
             Node::Leaf { key_rest, value } => {
                 let key = key_parts_stack.push_and_get_current(key_rest);
-                f(key, Some(value));
+                V::process_leaf(f, key, value);
                 key_parts_stack.pop();
             }
             Node::Interior { key_prefix, children } => {
                 let key = key_parts_stack.push_and_get_current(key_prefix);
-                f(key, None);
+                V::process_interior(f, key);
                 for child in children {
                     child.internal_iter_generic(key_parts_stack, f);
                 }
@@ -414,55 +437,20 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn internal_iter<'trie>(&'trie self, mut f: impl FnMut(&[&'trie str], Option<&'trie T>)) {
+    pub fn internal_iter(&self, mut f: impl FnMut(&[&str], Option<&T>)) {
         self.internal_iter_generic(&mut Vec::new(), &mut f);
     }
 
-    pub fn internal_iter_leafs(&self, mut f: impl FnMut(/* key_parts */&[&str], /* value */ &T)) {
-        fn internal_iter<'trie, T>(
-            cur_node: &'trie Node<T>,
-            key_parts_stack: &mut Vec<&'trie str>,
-            f: &mut impl FnMut(&[&'trie str], &'trie T)
-        ) {
-            match cur_node {
-                Node::Leaf { key_rest, value } => {
-                    key_parts_stack.push(key_rest);
-                    f(key_parts_stack.as_slice(), value);
-                    key_parts_stack.pop();
-                }
-                Node::Interior { key_prefix, children } => {
-                    key_parts_stack.push(key_prefix);
-                    for child in children {
-                        internal_iter(child, key_parts_stack, f);
-                    }
-                    key_parts_stack.pop();
-                }
-            }
-        }
-        internal_iter(self, &mut Vec::new(), &mut f);
+    pub fn internal_iter_leafs(&self, mut f: impl FnMut(&[&str], &T)) {
+        self.internal_iter_generic(&mut Vec::new(), &mut f);
     }
 
-    pub fn internal_iter_values_all(&self, mut f: impl FnMut(/* value */ Option<&T>)) {
+    pub fn internal_iter_values_all(&self, mut f: impl FnMut(Option<&T>)) {
         self.internal_iter_generic(&mut (), &mut |(), value| f(value));
     }
 
-    pub fn internal_iter_values_leafs(&self, mut f: impl FnMut(/* value */ &T)) {
-        fn internal_iter<'trie, T>(
-            cur_node: &'trie Node<T>,
-            f: &mut impl FnMut(&'trie T)
-        ) {
-            match cur_node {
-                Node::Leaf { value, .. } => {
-                    f(value);
-                }
-                Node::Interior { children, .. } => {
-                    for child in children {
-                        internal_iter(child, f);
-                    }
-                }
-            }
-        }
-        internal_iter(self, &mut f);
+    pub fn internal_iter_values_leafs(&self, mut f: impl FnMut(&T)) {
+        self.internal_iter_generic(&mut (), &mut |(), value| f(value));
     }
 
     pub fn external_iter_key_parts(&self) -> Iter<T> {

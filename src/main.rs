@@ -2,6 +2,11 @@
 #![feature(new_uninit)]
 #![feature(generators, generator_trait)]
 
+// use mimalloc::MiMalloc;
+
+// #[global_allocator]
+// static GLOBAL: MiMalloc = MiMalloc;
+
 use std::fs::File;
 use std::hint::black_box;
 use std::io::{self, BufRead, BufReader, BufWriter};

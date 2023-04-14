@@ -13,6 +13,7 @@ path = "src/main.rs"
 clap = { version = "4.1.8", features = ["derive", "cargo"] }
 anyhow = "1.0.69"
 unicode-segmentation = "1.10.1"
+# mimalloc = { version = "*", default-features = false }
 
 [profile.release]
 # overflow-checks = true

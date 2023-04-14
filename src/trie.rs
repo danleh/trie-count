@@ -145,12 +145,15 @@ impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
 /// - `K` to enable/disable returning the key parts, and with which representation.
 /// - `V` to enable/disable returning interior nodes, and with which representation.
 pub struct Iter<'trie, T, K, V> {
-    // The parts of the current key, as encountered along the spine of the tree.
+    /// A worklist of nodes still to process.
+    node_stack: Vec<&'trie Node<T>>,
+
+    /// The parts of the current key, as encountered along the spine of the tree.
     key_parts_stack: K,
 
-    // A worklist of nodes still to process.
-    // `None` is a marker to indicate to pop the last element from the current `key_parts_stack`.
-    node_stack: Vec<Option<&'trie Node<T>>>,
+    /// A flag to indicate that we must next pop an element from the `key_parts_stack`.
+    /// This is equivalent to saying `last_returned_value_was_leaf`.
+    must_pop_key_part: bool,
 
     phantom: std::marker::PhantomData<V>,
 }
@@ -159,28 +162,43 @@ pub struct Iter<'trie, T, K, V> {
 /// (when returning the key parts).
 impl<'trie, T, K, V> Iter<'trie, T, K, V>
 where
-    K: KeyStack<'trie>,
+    K: KeyStack<'trie> + Default,
     V: Value<'trie, T>,
 {
+    pub fn new(root: &'trie Node<T>) -> Self {
+        Self {
+            node_stack: vec![root],
+            key_parts_stack: K::default(),
+            must_pop_key_part: false,
+            phantom: std::marker::PhantomData,
+        }
+    }
+
     pub fn next<'next>(&'next mut self) -> Option<(<K as KeyWithLifetime<'next>>::Key, V)> {
         while let Some(cur_node) = self.node_stack.pop() {
+            if self.must_pop_key_part {
+                self.key_parts_stack.pop();
+                self.must_pop_key_part = false;
+            }
             match cur_node {
-                Some(Node::Leaf { key_rest, value }) => {
-                    self.node_stack.push(None);
-
+                Node::Leaf { key_rest, value } => {
+                    // After the client code has processed the key of this leaf, we must pop the
+                    // last key part. However, once we have returned, we no longer have control to
+                    // do so, so we defer it via this flag until the next call to `next`.
+                    self.must_pop_key_part = true;
+                    
                     let key = self.key_parts_stack.push_and_get_current(key_rest);
                     return Some((key, V::leaf(value)));
                 },
-                Some(Node::Interior { key_prefix, children }) => {
+                Node::Interior { key_prefix, children } => {
                     // Process the children next, i.e., depth-first traversal.
-                    // self.node_stack.extend(children.iter().rev().map(Some));
+                    self.node_stack.extend(children.iter().rev());
 
                     if V::WITH_INTERIOR {
                         let key = self.key_parts_stack.push_and_get_current(key_prefix);
                         return Some((key, V::interior()));
                     }
                 },
-                None => self.key_parts_stack.pop(),
             }
         }
         None
@@ -374,27 +392,15 @@ impl<T> Node<T> {
     }
 
     pub fn external_iter_items(&self) -> Iter<T, Vec<&str>, Option<&T>> {
-        Iter {
-            key_parts_stack: vec![],
-            node_stack: vec![Some(self)],
-            phantom: std::marker::PhantomData,
-        }
+        Iter::new(self)
     }
 
     pub fn external_iter_items_leafs(&self) -> Iter<T, Vec<&str>, &T> {
-        Iter {
-            key_parts_stack: vec![],
-            node_stack: vec![Some(self)],
-            phantom: std::marker::PhantomData,
-        }
+        Iter::new(self)
     }
 
     pub fn external_iter_values(&self) -> Iter<T, (), &T> {
-        Iter {
-            key_parts_stack: (),
-            node_stack: vec![Some(self)],
-            phantom: std::marker::PhantomData,
-        }
+        Iter::new(self)
     }
 
     // TODO: add external iterator without keys, and with ony leafs.

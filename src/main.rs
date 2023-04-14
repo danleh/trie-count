@@ -85,7 +85,17 @@ fn main() -> anyhow::Result<()> {
     }
     trie::internal_iter_value(&root, |value| p(*value));
 
+    let sum = test_internal_iterator_specialization(&root);
+    println!("{}", sum);
+
     Ok(())
+}
+
+#[inline(never)]
+fn test_internal_iterator_specialization(root: &trie::Node<i32>) -> i32 {
+    let mut sum = 0;
+    root.internal_iter_values_leafs(|value| sum += *value);
+    sum
 }
 
 // TODO test double inserts

@@ -128,26 +128,36 @@ impl<'trie, T> ValueRepr<'trie, T> for Option<&'trie T> {
     }
 }
 
-pub trait KeyStack<'trie> {
-    type Key<'iter> where Self: 'iter;
-    fn push_and_get_current<'iter>(&'iter mut self, key_part: &'trie str) -> Self::Key<'iter>;
+/// Ultra hack, due to https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats
+trait KeyStackLifetime<'this, ImplicitBounds = &'this Self> {
+    type Key;
+}
+
+trait KeyStack<'trie> : for<'this /* where Self: 'this */> KeyStackLifetime<'this> {
+    fn push_and_get_current<'temp>(&'temp mut self, key_part: &'trie str) -> <Self as KeyStackLifetime<'temp>>::Key;
     fn pop(&mut self);
 }
 
-// /// Implementation for not tracking/returning the key at all.
-// impl<'trie> KeyStack<'trie> for () {
-//     type Key<'iter> = ();
-//     fn push_and_get_current(&mut self, _: &str) {}
-//     fn pop(&mut self) {}
-// }
+/// Implementation for not tracking/returning the key at all.
+impl KeyStackLifetime<'_> for () {
+    type Key = ();
+}
+
+impl KeyStack<'_> for () {
+    fn push_and_get_current(&mut self, _: &str) {}
+    fn pop(&mut self) {}
+}
 
 /// Implementation for returning the key as a `&[&str]` slice.
 /// This is the most efficient key representation (if tracking keys at all),
 /// since it avoids copying the key parts and does not require a heap allocation
 /// for each key.
+impl<'this, 'trie> KeyStackLifetime<'this> for Vec<&'trie str> {
+    type Key = &'this [&'trie str];
+}
+
 impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
-    type Key<'iter> = &'iter [&'trie str] where 'trie: 'iter;
-    fn push_and_get_current<'iter>(&'iter mut self, key_part: &'trie str) -> &'iter [&'trie str] {
+    fn push_and_get_current<'temp>(&'temp mut self, key_part: &'trie str) -> <Self as KeyStackLifetime<'temp>>::Key {
         self.push(key_part);
         self.as_slice()
     }
@@ -155,20 +165,6 @@ impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
         self.pop();
     }
 }
-
-// impl<'trie> Key<'trie> for String {
-//     type KeyStack = Vec<&'trie str>;
-// }
-
-// impl<'trie> KeyStack<'trie, String> for Vec<&'trie str> {
-//     fn push_and_get_current(&mut self, key_part: &'trie str) -> String {
-//         self.push(key_part);
-//         self.join("")
-//     }
-//     fn pop(&mut self) {
-//         self.pop();
-//     }
-// }
 
 
 // TODO can this even be generic over owning vs ref vs ref_mut?
@@ -398,17 +394,15 @@ impl<T> Node<T> {
         f: &mut F)
     where
         KS: KeyStack<'trie>,
-        F: for <'iter> FnMut(/* key */ KS::Key<'iter>, Option<&'trie T>)
+        F: FnMut(/* key */ <KS as KeyStackLifetime<'_>>::Key, Option<&'trie T>)
     {
         match self {
             Node::Leaf { key_rest, value } => {
-                // let key_rest = key_rest.to_string();
                 let key = key_parts_stack.push_and_get_current(key_rest);
                 f(key, Some(value));
                 key_parts_stack.pop();
             }
             Node::Interior { key_prefix, children } => {
-                // let key_prefix = key_prefix.to_string();
                 let key = key_parts_stack.push_and_get_current(key_prefix);
                 f(key, None);
                 for child in children {
@@ -419,31 +413,7 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn internal_iter<'trie, F>(&'trie self, mut f: F)
-    where
-        F: for<'iter> FnMut(&'iter [&'trie str], Option<&'trie T>)
-    {
-        // fn internal_iter<'trie, T>(
-        //     cur_node: &'trie Node<T>,
-        //     key_parts_stack: &mut Vec<&'trie str>,
-        //     f: &mut impl FnMut(&[&'trie str], Option<&'trie T>)
-        // ) {
-        //     match cur_node {
-        //         Node::Leaf { key_rest, value } => {
-        //             key_parts_stack.push(key_rest);
-        //             f(key_parts_stack.as_slice(), Some(value));
-        //             key_parts_stack.pop();
-        //         }
-        //         Node::Interior { key_prefix, children } => {
-        //             key_parts_stack.push(key_prefix);
-        //             f(key_parts_stack.as_slice(), None);
-        //             for child in children {
-        //                 internal_iter(child, key_parts_stack, f);
-        //             }
-        //             key_parts_stack.pop();
-        //         }
-        //     }
-        // }
+    pub fn internal_iter<'trie>(&'trie self, mut f: impl FnMut(&[&'trie str], Option<&'trie T>)) {
         self.internal_iter_generic(&mut Vec::new(), &mut f);
     }
 
@@ -472,23 +442,7 @@ impl<T> Node<T> {
     }
 
     pub fn internal_iter_values_all(&self, mut f: impl FnMut(/* value */ Option<&T>)) {
-        fn internal_iter<'trie, T>(
-            cur_node: &'trie Node<T>,
-            f: &mut impl FnMut(Option<&'trie T>)
-        ) {
-            match cur_node {
-                Node::Leaf { value, .. } => {
-                    f(Some(value));
-                }
-                Node::Interior { children, .. } => {
-                    f(None);
-                    for child in children {
-                        internal_iter(child, f);
-                    }
-                }
-            }
-        }
-        internal_iter(self, &mut f);
+        self.internal_iter_generic(&mut (), &mut |(), value| f(value));
     }
 
     pub fn internal_iter_values_leafs(&self, mut f: impl FnMut(/* value */ &T)) {

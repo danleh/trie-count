@@ -2,13 +2,14 @@
 #![feature(new_uninit)]
 #![feature(generators, generator_trait)]
 
+#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
+
 // use mimalloc::MiMalloc;
 
 // #[global_allocator]
 // static GLOBAL: MiMalloc = MiMalloc;
 
 use std::fs::File;
-use std::hint::black_box;
 use std::io::{self, BufRead, BufReader, BufWriter};
 
 use clap::Parser;
@@ -87,9 +88,6 @@ fn main() -> anyhow::Result<()> {
     let sum2 = test_external_iter_values(&root);
     println!("{sum2}");
 
-    let sum3 = test_external_iter_values_unsafe(&root);
-    println!("{sum3}");
-
     Ok(())
 }
 
@@ -105,15 +103,6 @@ fn test_external_iter_values(root: &trie::Node<i32>) -> i32 {
     let mut sum = 0;
     let mut iter = root.external_iter_values();
     while let Some((_key, _value)) = iter.next() {
-        sum += 17;
-    }
-    sum
-}
-
-#[inline(never)]
-fn test_external_iter_values_unsafe(root: &trie::Node<i32>) -> i32 {
-    let mut sum = 0;
-    for _value in trie::external_iter_value_unsafe(root) {
         sum += 17;
     }
     sum

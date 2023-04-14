@@ -144,7 +144,8 @@ impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
 /// External pre-order depth-first iterator, configurable by `K` and `V`.
 pub struct Iter<'trie, T, K, V> {
     /// A worklist of nodes still to process.
-    node_stack: Vec<&'trie Node<T>>,
+    node_stack: [MaybeUninit<&'trie Node<T>>; 1024],
+    len: usize,
 
     /// The parts of the current key, as encountered along the spine of the tree.
     key_parts_stack: K,
@@ -165,16 +166,23 @@ where
     V: Value<'trie, T>,
 {
     pub fn new(root: &'trie Node<T>) -> Self {
+        let mut node_stack: [MaybeUninit<&'trie Node<T>>; 1024] = unsafe { MaybeUninit::uninit().assume_init() };
+        unsafe { node_stack.get_unchecked_mut(0).write(root); }
         Self {
-            node_stack: vec![root],
+            node_stack,
+            len: 1,
             key_parts_stack: K::default(),
             must_pop_key_part: false,
             value_representation: PhantomData,
         }
     }
 
+    #[allow(clippy::needless_lifetimes)]
     pub fn next<'next>(&'next mut self) -> Option<(<K as KeyWithLifetime<'next>>::Key, V)> {
-        while let Some(cur_node) = self.node_stack.pop() {
+        while self.len > 0 {
+            self.len -= 1;
+            let cur_node = unsafe { self.node_stack.get_unchecked(self.len).assume_init() };
+
             if self.must_pop_key_part {
                 self.key_parts_stack.pop();
                 self.must_pop_key_part = false;
@@ -191,7 +199,10 @@ where
                 },
                 Node::Interior { key_prefix, children } => {
                     // Process the children next, i.e., depth-first traversal.
-                    self.node_stack.extend(children.iter().rev());
+                    for child in children.iter().rev() {
+                        unsafe { self.node_stack.get_unchecked_mut(self.len).write(child); }
+                        self.len += 1;
+                    }
 
                     if V::WITH_INTERIOR {
                         let key = self.key_parts_stack.push_and_get_current(key_prefix);
@@ -202,30 +213,6 @@ where
         }
         None
     }
-}
-
-#[inline(never)]
-pub fn external_iter_value_unsafe(node: &Node<i32>) -> impl Iterator<Item=&i32> {
-    let mut stack: [MaybeUninit<&Node<i32>>; 1024] = unsafe { MaybeUninit::uninit().assume_init() };
-    let mut len = 0;
-    unsafe { stack.get_unchecked_mut(len).write(node); }
-    len += 1;
-    std::iter::from_fn(move || {
-        while len > 0 {
-            len -= 1;
-            let cur_node = unsafe { stack.get_unchecked(len).assume_init() };
-            match cur_node {
-                Node::Leaf { value, .. } => return Some(value),
-                Node::Interior { children, .. } => {
-                    for child in children.iter().rev() {
-                        len += 1;
-                        unsafe { stack.get_unchecked_mut(len).write(child); }
-                    }
-                }
-            }
-        }
-        None
-    })
 }
 
 // ASCII Art of this trie:
@@ -587,7 +574,7 @@ impl<T> Node<T> {
             common_prefix, 
             left_rest: self_rest,
             right_rest: key_rest
-        } = split_prefix_rest(&self.common_prefix(), key, split_points);
+        } = split_prefix_rest(self.common_prefix(), key, split_points);
 
         // No common prefix, so cannot insert into this sub-trie.
         if common_prefix.is_empty() {

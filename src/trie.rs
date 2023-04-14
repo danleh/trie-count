@@ -387,9 +387,9 @@ pub enum InsertResult<T> {
     Duplicate { old_value: T },
 }
 
-#[cfg(test)]
+// #[cfg(test)]
 const TEST_INDENT: &str = "  ";
-#[cfg(test)]
+// #[cfg(test)]
 const TEST_DELIM: &str = ":";
 
 impl<T> Node<T> {
@@ -422,15 +422,15 @@ impl<T> Node<T> {
     }
 
     /// Depth-first traversal of the trie, including interior nodes, and with returning key parts.
-    fn internal_iter_generic<'trie, KPS, V, F>(
+    fn internal_iter_generic<'trie, K, V, F>(
         &'trie self,
-        key_parts_stack: &mut KPS,
+        key_parts_stack: &mut K,
         // TODO switch that to FnMut + Clone
         f: &mut F)
     where
-        KPS: KeyStack<'trie>,
+        K: KeyStack<'trie>,
         V: Value<'trie, T>,
-        F: for<'temp> FnMut(<KPS as KeyWithLifetime<'temp>>::Key, V)
+        F: for<'any> FnMut(<K as KeyWithLifetime<'any>>::Key, V)
     {
         match self {
             Node::Leaf { key_rest, value } => {
@@ -449,19 +449,18 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn internal_iter(&self, mut f: impl FnMut(&[&str], Option<&T>)) {
+    /// Depth-first traversal of the trie, including interior nodes, and with key parts.
+    pub fn internal_iter_items(&self, mut f: impl FnMut(/* key_parts */ &[&str], /* value */ Option<&T>)) {
         self.internal_iter_generic(&mut Vec::new(), &mut f);
     }
 
-    pub fn internal_iter_leafs(&self, mut f: impl FnMut(&[&str], &T)) {
+    /// Depth-first traversal of the trie, _not_ including interior nodes, and with key parts.
+    pub fn internal_iter_items_leafs(&self, mut f: impl FnMut(/* key_parts */ &[&str], /* value */ &T)) {
         self.internal_iter_generic(&mut Vec::new(), &mut f);
     }
 
-    pub fn internal_iter_values_all(&self, mut f: impl FnMut(Option<&T>)) {
-        self.internal_iter_generic(&mut (), &mut |(), value| f(value));
-    }
-
-    pub fn internal_iter_values_leafs(&self, mut f: impl FnMut(&T)) {
+    /// Depth-first traversal of the trie, but without key parts, thus returning only the values of leafs.
+    pub fn internal_iter_values(&self, mut f: impl FnMut(/* value */ &T)) {
         self.internal_iter_generic(&mut (), &mut |(), value| f(value));
     }
 
@@ -516,8 +515,8 @@ impl<T> Node<T> {
     //     "qux":2
     //   "":3
 
-    #[cfg(test)]
-    fn from_test_string(str: &str) -> Self
+    // #[cfg(test)]
+    pub fn from_test_string(str: &str) -> Self
         where T: FromStr,
               <T as FromStr>::Err: std::fmt::Debug,
     {

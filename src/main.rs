@@ -85,6 +85,12 @@ fn main() -> anyhow::Result<()> {
     }
     trie::internal_iter_value(&root, |value| p(*value));
 
+    let root = trie::Node::from_test_string(r#""foo"
+  "bar"
+    "":0
+    "qux":1
+  "qux":2
+  "":3"#);
     let sum = test_internal_iterator_specialization(&root);
     println!("{}", sum);
 
@@ -94,7 +100,7 @@ fn main() -> anyhow::Result<()> {
 #[inline(never)]
 fn test_internal_iterator_specialization(root: &trie::Node<i32>) -> i32 {
     let mut sum = 0;
-    root.internal_iter_values_leafs(|value| sum += *value);
+    root.internal_iter_values_leafs(|value| sum += 17);
     sum
 }
 

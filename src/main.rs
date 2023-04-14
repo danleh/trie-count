@@ -81,7 +81,7 @@ fn main() -> anyhow::Result<()> {
 
     #[inline(never)]
     fn p(value: i32) {
-        println!("{}", value);
+        println!("{value}");
     }
     trie::internal_iter_value(&root, |value| p(*value));
 
@@ -92,7 +92,10 @@ fn main() -> anyhow::Result<()> {
   "qux":2
   "":3"#);
     let sum = test_internal_iterator_specialization(&root);
-    println!("{}", sum);
+    println!("{sum}");
+
+    let sum2 = test_external_iterator_specialization(&root);
+    println!("{sum2}");
 
     Ok(())
 }
@@ -100,7 +103,17 @@ fn main() -> anyhow::Result<()> {
 #[inline(never)]
 fn test_internal_iterator_specialization(root: &trie::Node<i32>) -> i32 {
     let mut sum = 0;
-    root.internal_iter_values(|value| sum += 17);
+    root.internal_iter_values(|_value| sum += 17);
+    sum
+}
+
+#[inline(never)]
+fn test_external_iterator_specialization(root: &trie::Node<i32>) -> i32 {
+    let mut sum = 0;
+    let mut iter = root.external_iter_values();
+    while let Some((_key, _value)) = iter.next() {
+        sum += 17;
+    }
     sum
 }
 

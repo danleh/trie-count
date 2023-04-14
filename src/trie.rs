@@ -38,7 +38,7 @@
 //     // }
 // }
 
-use std::{str::FromStr, cell::RefCell, hint::unreachable_unchecked, ops::Generator, mem::MaybeUninit};
+use std::{str::FromStr, hint::unreachable_unchecked, ops::Generator, mem::MaybeUninit};
 
 use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 
@@ -61,73 +61,6 @@ pub enum Node<T> {
     // TODO: Alternative design: allow interior nodes to have values.
 }
 
-trait KeyRepr<'iter, 'trie> {
-    const WITH_KEYS: bool;
-    fn key(key_parts: &'iter [&'trie str]) -> Self;
-}
-
-/// Implementation for not tracking/returning the key at all.
-impl KeyRepr<'_, '_> for () {
-    const WITH_KEYS: bool = false;
-    fn key(_: &[&str]) -> Self {}
-}
-
-/// Implementation for returning the key as a `String`.
-impl KeyRepr<'_, '_> for String {
-    const WITH_KEYS: bool = true;
-    fn key(key_parts: &[&str]) -> Self {
-        key_parts.join("")
-    }
-}
-
-/// Implementation for returning the key as a `Vec` of `&str` parts.
-impl<'trie> KeyRepr<'_, 'trie> for Vec<&'trie str> {
-    const WITH_KEYS: bool = true;
-    fn key(key_parts: &[&'trie str]) -> Self {
-        key_parts.to_vec()
-    }
-}
-
-/// Implementation for returning the key as a `&[&str]` slice.
-/// This is the most efficient key representation, since it avoids copying the 
-/// key parts and does not require a heap allocation for each key.
-impl<'iter, 'trie> KeyRepr<'iter, 'trie> for &'iter [&'trie str] {
-    const WITH_KEYS: bool = true;
-    fn key(key_parts: &'iter [&'trie str]) -> Self {
-        key_parts
-    }
-}
-
-trait ValueRepr<'trie, T> {
-    const WITH_INTERIOR: bool;
-    fn interior() -> Self;
-    fn value(value: &'trie T) -> Self;
-}
-
-/// Implementation for only iterating over leaf nodes (which always have a value).
-impl<'trie, T> ValueRepr<'trie, T> for &'trie T {
-    const WITH_INTERIOR: bool = false;
-    fn interior() -> Self {
-        unsafe {
-            unreachable_unchecked()
-        }
-    }
-    fn value(value: &'trie T) -> Self {
-        value
-    }
-}
-
-/// Implementation for iterating over all nodes, including interior nodes.
-impl<'trie, T> ValueRepr<'trie, T> for Option<&'trie T> {
-    const WITH_INTERIOR: bool = true;
-    fn interior() -> Self {
-        None
-    }
-    fn value(value: &'trie T) -> Self {
-        Some(value)
-    }
-}
-
 // The `KeyStack` is essentially a lending iterator, because it returns a key representation
 // that can borrow not only from the trie, but also from the key stack itself.
 // I want to make this a trait, such that I can have multiple implementations, e.g., one where
@@ -145,11 +78,11 @@ impl<'trie, T> ValueRepr<'trie, T> for Option<&'trie T> {
 // by Sabrina Jewson. Great work and thanks to her for sharing this!
 // This trait is just to avoid duplicated implementations, so I did not use the sealed bounds
 // variant that she describes as well, since it adds even more complexity.
-trait KeyWithLifetime<'this, ImplicitBounds = &'this Self> {
+pub trait KeyWithLifetime<'this, ImplicitBounds = &'this Self> {
     type Key;
 }
 
-trait KeyStack<'trie> : for<'any /* where Self: 'any */> KeyWithLifetime<'any> {
+pub trait KeyStack<'trie> : for<'any /* where Self: 'any */> KeyWithLifetime<'any> {
     fn push_and_get_current<'temp>(&'temp mut self, key_part: &'trie str) -> <Self as KeyWithLifetime<'temp>>::Key;
     fn pop(&mut self);
 }
@@ -186,91 +119,68 @@ impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
 }
 
 /// Trait for processing values, either both leafs and interior nodes, or only leafs.
-trait Value<'trie, T> : Sized {
-    fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T);
-    fn process_interior<K>(f: &mut impl FnMut(K, Self), key: K);
+pub trait Value<'trie, T> {
+    const WITH_INTERIOR: bool;
+    fn leaf(value: &'trie T) -> Self;
+    fn interior() -> Self;
 }
 
 /// Implementation for only iterating over leaf nodes (which always have a value).
 impl<'trie, T> Value<'trie, T> for &'trie T {
-    #[inline(always)]
-    fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T) {
-        f(key, value)
-    }
-    
-    #[inline(always)]
-    fn process_interior<K>(_f: &mut impl FnMut(K, Self), _: K) {
-        // Since the function `_f` is only interested in leafs, don't call it at all.
-    }
+    const WITH_INTERIOR: bool = false;
+    fn leaf(value: &'trie T) -> Self { value }
+    fn interior() -> Self { unreachable!() }
 }
 
 /// Implementation for iterating over all nodes, including interior nodes (which are `None`).
 impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
-    #[inline(always)]
-    fn process_leaf<K>(f: &mut impl FnMut(K, Self), key: K, value: &'trie T) {
-        f(key, Some(value))
-    }
-    
-    #[inline(always)]
-    fn process_interior<K>(f: &mut impl FnMut(K, Self), key: K) {
-        f(key, None)
-    }
+    const WITH_INTERIOR: bool = true;
+    fn leaf(value: &'trie T) -> Self { Some(value) }
+    fn interior() -> Self { None }
 }
 
 
 
-pub struct Iter<'trie, T> {
+/// Can be configured with:
+/// - `K` to enable/disable returning the key parts, and with which representation.
+/// - `V` to enable/disable returning interior nodes, and with which representation.
+pub struct Iter<'trie, T, K, V> {
     // The parts of the current key, as encountered along the spine of the tree.
-    key_parts_stack: Vec<&'trie str>,
-    // Essentially a worklist of nodes to process.
-    // `None` is used as a marker, to indicate to pop the last element from the
-    // current `key_parts_stack`.
+    key_parts_stack: K,
+
+    // A worklist of nodes still to process.
+    // `None` is a marker to indicate to pop the last element from the current `key_parts_stack`.
     node_stack: Vec<Option<&'trie Node<T>>>,
+
+    phantom: std::marker::PhantomData<V>,
 }
 
 /// Cannot implement the `Iterator` trait because `next` borrows from the iterator itself
 /// (when returning the key parts).
-impl<'trie, T> Iter<'trie, T> {
-    /// Can be configured with:
-    /// - `K` to enable/disable returning the key parts, and with which representation.
-    /// - `V` to enable/disable returning interior nodes, and with which representation.
-    fn next<'iter, K, V>(&'iter mut self) -> Option<(K, V)>
-    where
-        K: KeyRepr<'iter, 'trie>,
-        V: ValueRepr<'trie, T>,
-    {
+impl<'trie, T, K, V> Iter<'trie, T, K, V>
+where
+    K: KeyStack<'trie>,
+    V: Value<'trie, T>,
+{
+    pub fn next<'next>(&'next mut self) -> Option<(<K as KeyWithLifetime<'next>>::Key, V)> {
         while let Some(cur_node) = self.node_stack.pop() {
             match cur_node {
                 Some(Node::Leaf { key_rest, value }) => {
-                    if K::WITH_KEYS {
-                        self.node_stack.push(None);
-                        self.key_parts_stack.push(key_rest);
-                    }
-                    let key_parts = self.key_parts_stack.as_slice();
-                    return Some((K::key(key_parts), V::value(value)));
+                    self.node_stack.push(None);
+
+                    let key = self.key_parts_stack.push_and_get_current(key_rest);
+                    return Some((key, V::leaf(value)));
                 },
                 Some(Node::Interior { key_prefix, children }) => {
-                    if K::WITH_KEYS {
-                        self.node_stack.push(None);
-                        self.key_parts_stack.push(key_prefix);
-                    }
                     // Process the children next, i.e., depth-first traversal.
-                    self.node_stack.extend(children.iter().rev().map(Some));
+                    // self.node_stack.extend(children.iter().rev().map(Some));
+
                     if V::WITH_INTERIOR {
-                        let key_parts = self.key_parts_stack.as_slice();
-                        return Some((K::key(key_parts), V::interior()));
+                        let key = self.key_parts_stack.push_and_get_current(key_prefix);
+                        return Some((key, V::interior()));
                     }
                 },
-                None => {
-                    if K::WITH_KEYS {
-                        self.key_parts_stack.pop();
-                    } else {
-                        // SAFETY: This is unreachable, since we only push `None` if `K::WITH_KEYS`.
-                        unsafe {
-                            unreachable_unchecked();
-                        }
-                    }
-                }
+                None => self.key_parts_stack.pop(),
             }
         }
         None
@@ -316,26 +226,6 @@ pub fn internal_iter_value(node: &Node<i32>, mut f: impl FnMut(&i32)) {
     internal_iter_value(node, &mut f)
 }
 
-pub struct VecKeyIter<'trie, T>(Iter<'trie, T>);
-
-impl<'trie, T> Iterator for VecKeyIter<'trie, T> {
-    type Item = (Vec<&'trie str>, &'trie T);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
-    }
-}
-
-pub struct StringKeyIter<'trie, T>(Iter<'trie, T>);
-
-impl<'trie, T> Iterator for StringKeyIter<'trie, T> {
-    type Item = (String, &'trie T);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
-    }
-}
-
 // ASCII Art of this trie:
 // "foo"
 // ├── "bar"
@@ -362,39 +252,40 @@ fn test_trie() -> Node<u32> {
     }
 }
 
+// FIXME
 #[test]
-fn test_iter_key_parts_vec() {
+fn test_iter_lending() {
     let root = test_trie();
-    let mut iter = root.external_iter_key_parts_vec();
-    assert_eq!(iter.next(), Some((vec!["foo", "bar"], &0)));
-    assert_eq!(iter.next(), Some((vec!["foo", "bar", "qux"], &1)));
-    assert_eq!(iter.next(), Some((vec!["foo", "qux"], &2)));
-    assert_eq!(iter.next(), Some((vec!["foo"], &3)));
+    let mut iter = root.external_iter_items_leafs();
+    assert_eq!(iter.next(), Some((&["foo", "bar"][..], &0)));
+    assert_eq!(iter.next(), Some((&["foo", "bar", "qux"][..], &1)));
+    assert_eq!(iter.next(), Some((&["foo", "qux"][..], &2)));
+    assert_eq!(iter.next(), Some((&["foo"][..], &3)));
     assert_eq!(iter.next(), None);
 }
 
-// FIXME
 // #[test]
-// fn test_iter_lending() {
+// fn test_iter_key_parts_vec() {
 //     let root = test_trie();
-//     let mut iter = root.iter_key_parts();
-//     assert_eq!(iter.next(), Some((&["foo", "bar"][..], &0)));
-//     assert_eq!(iter.next(), Some((&["foo", "bar", "qux"][..], &1)));
-//     assert_eq!(iter.next(), Some((&["foo", "qux"][..], &2)));
-//     assert_eq!(iter.next(), Some((&["foo"][..], &3)));
+//     let mut iter = root.external_iter_key_parts();
+//     assert_eq!(iter.next(), Some((vec!["foo", "bar"], &0)));
+//     assert_eq!(iter.next(), Some((vec!["foo", "bar", "qux"], &1)));
+//     assert_eq!(iter.next(), Some((vec!["foo", "qux"], &2)));
+//     assert_eq!(iter.next(), Some((vec!["foo"], &3)));
 //     assert_eq!(iter.next(), None);
 // }
 
-#[test]
-fn test_iter_key_string() {
-    let root = test_trie();
-    let mut iter = root.external_iter_key_string();
-    assert_eq!(iter.next(), Some(("foobar".into(), &0)));
-    assert_eq!(iter.next(), Some(("foobarqux".into(), &1)));
-    assert_eq!(iter.next(), Some(("fooqux".into(), &2)));
-    assert_eq!(iter.next(), Some(("foo".into(), &3)));
-    assert_eq!(iter.next(), None);
-}
+// FIXME
+// #[test]
+// fn test_iter_key_string() {
+//     let root = test_trie();
+//     let mut iter = root.external_iter_key_parts().map(|(key_parts, value)| (key_parts.join(":"), value));
+//     assert_eq!(iter.next(), Some(("foobar".into(), &0)));
+//     assert_eq!(iter.next(), Some(("foobarqux".into(), &1)));
+//     assert_eq!(iter.next(), Some(("fooqux".into(), &2)));
+//     assert_eq!(iter.next(), Some(("foo".into(), &3)));
+//     assert_eq!(iter.next(), None);
+// }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum InsertResult<T> {
@@ -449,12 +340,16 @@ impl<T> Node<T> {
         match self {
             Node::Leaf { key_rest, value } => {
                 let key = key_parts_stack.push_and_get_current(key_rest);
-                V::process_leaf(f, key, value);
+                f(key, V::leaf(value));
                 key_parts_stack.pop();
             }
             Node::Interior { key_prefix, children } => {
                 let key = key_parts_stack.push_and_get_current(key_prefix);
-                V::process_interior(f, key);
+                if V::WITH_INTERIOR {
+                    f(key, V::interior());
+                } else {
+                    drop(key);
+                }
                 for child in children {
                     child.internal_iter_generic(key_parts_stack, f);
                 }
@@ -478,24 +373,31 @@ impl<T> Node<T> {
         self.internal_iter_generic(&mut (), &mut |(), value| f(value));
     }
 
-    pub fn external_iter_key_parts(&self) -> Iter<T> {
+    pub fn external_iter_items(&self) -> Iter<T, Vec<&str>, Option<&T>> {
         Iter {
             key_parts_stack: vec![],
             node_stack: vec![Some(self)],
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    pub fn external_iter_items_leafs(&self) -> Iter<T, Vec<&str>, &T> {
+        Iter {
+            key_parts_stack: vec![],
+            node_stack: vec![Some(self)],
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    pub fn external_iter_values(&self) -> Iter<T, (), &T> {
+        Iter {
+            key_parts_stack: (),
+            node_stack: vec![Some(self)],
+            phantom: std::marker::PhantomData,
         }
     }
 
     // TODO: add external iterator without keys, and with ony leafs.
-
-    // TODO: Not sure we need those two, the consumer can always just create the appropriate key type from the parts.
-
-    pub fn external_iter_key_parts_vec(&self) -> VecKeyIter<T> {
-        VecKeyIter(self.external_iter_key_parts())
-    }
-
-    pub fn external_iter_key_string(&self) -> StringKeyIter<T> {
-        StringKeyIter(self.external_iter_key_parts())
-    }
 
     #[cfg(test)]
     fn to_test_string(&self) -> String
@@ -503,8 +405,8 @@ impl<T> Node<T> {
     {
         use std::fmt::Write;
         let mut str_acc = String::new();
-        let mut iter = self.external_iter_key_parts();
-        while let Some((key_parts, maybe_value)) = iter.next::<&[&str], Option<&T>>() {
+        let mut iter = self.external_iter_items();
+        while let Some((key_parts, maybe_value)) = iter.next() {
             let level = key_parts.len() - 1;
             for _ in 0..level {
                 str_acc.push_str(TEST_INDENT);

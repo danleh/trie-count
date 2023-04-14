@@ -128,18 +128,18 @@ impl<'trie, T> ValueRepr<'trie, T> for Option<&'trie T> {
     }
 }
 
-pub trait KeyStack<'trie> : Default {
+pub trait KeyStack<'trie> {
     type Key<'iter> where Self: 'iter;
     fn push_and_get_current<'iter>(&'iter mut self, key_part: &'trie str) -> Self::Key<'iter>;
     fn pop(&mut self);
 }
 
 // /// Implementation for not tracking/returning the key at all.
-impl<'trie> KeyStack<'trie> for () {
-    type Key<'iter> = ();
-    fn push_and_get_current(&mut self, _: &str) {}
-    fn pop(&mut self) {}
-}
+// impl<'trie> KeyStack<'trie> for () {
+//     type Key<'iter> = ();
+//     fn push_and_get_current(&mut self, _: &str) {}
+//     fn pop(&mut self) {}
+// }
 
 /// Implementation for returning the key as a `&[&str]` slice.
 /// This is the most efficient key representation (if tracking keys at all),
@@ -392,19 +392,23 @@ impl<T> Node<T> {
     }
 
     /// Depth-first traversal of the trie, including interior nodes, and with returning key parts.
-    fn internal_iter_generic<'trie, KS, F>(&'trie self, key_parts_stack: &mut KS, f: &mut F)
+    fn internal_iter_generic<'trie, KS, F>(
+        &'trie self,
+        key_parts_stack: &mut KS,
+        f: &mut F)
     where
-        KS: KeyStack<'trie> + 'trie,
-        // TODO Generify over with vs. without value as well.
-        F: for<'iter> FnMut(/* key */ KS::Key<'iter>, Option<&'trie T>),
+        KS: KeyStack<'trie>,
+        F: for <'iter> FnMut(/* key */ KS::Key<'iter>, Option<&'trie T>)
     {
         match self {
             Node::Leaf { key_rest, value } => {
+                // let key_rest = key_rest.to_string();
                 let key = key_parts_stack.push_and_get_current(key_rest);
                 f(key, Some(value));
                 key_parts_stack.pop();
             }
             Node::Interior { key_prefix, children } => {
+                // let key_prefix = key_prefix.to_string();
                 let key = key_parts_stack.push_and_get_current(key_prefix);
                 f(key, None);
                 for child in children {
@@ -415,27 +419,52 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn internal_iter_leafs<F>(&self, mut f: F)
+    pub fn internal_iter<'trie, F>(&'trie self, mut f: F)
     where
-        F: FnMut(/* key_parts */&[&str], /* value */ &T)
+        F: for<'iter> FnMut(&'iter [&'trie str], Option<&'trie T>)
     {
+        // fn internal_iter<'trie, T>(
+        //     cur_node: &'trie Node<T>,
+        //     key_parts_stack: &mut Vec<&'trie str>,
+        //     f: &mut impl FnMut(&[&'trie str], Option<&'trie T>)
+        // ) {
+        //     match cur_node {
+        //         Node::Leaf { key_rest, value } => {
+        //             key_parts_stack.push(key_rest);
+        //             f(key_parts_stack.as_slice(), Some(value));
+        //             key_parts_stack.pop();
+        //         }
+        //         Node::Interior { key_prefix, children } => {
+        //             key_parts_stack.push(key_prefix);
+        //             f(key_parts_stack.as_slice(), None);
+        //             for child in children {
+        //                 internal_iter(child, key_parts_stack, f);
+        //             }
+        //             key_parts_stack.pop();
+        //         }
+        //     }
+        // }
+        self.internal_iter_generic(&mut Vec::new(), &mut f);
+    }
+
+    pub fn internal_iter_leafs(&self, mut f: impl FnMut(/* key_parts */&[&str], /* value */ &T)) {
         fn internal_iter<'trie, T>(
             cur_node: &'trie Node<T>,
-            key_parts: &mut Vec<&'trie str>,
+            key_parts_stack: &mut Vec<&'trie str>,
             f: &mut impl FnMut(&[&'trie str], &'trie T)
         ) {
             match cur_node {
                 Node::Leaf { key_rest, value } => {
-                    key_parts.push(key_rest);
-                    f(key_parts.as_slice(), value);
-                    key_parts.pop();
+                    key_parts_stack.push(key_rest);
+                    f(key_parts_stack.as_slice(), value);
+                    key_parts_stack.pop();
                 }
                 Node::Interior { key_prefix, children } => {
-                    key_parts.push(key_prefix);
+                    key_parts_stack.push(key_prefix);
                     for child in children {
-                        internal_iter(child, key_parts, f);
+                        internal_iter(child, key_parts_stack, f);
                     }
-                    key_parts.pop();
+                    key_parts_stack.pop();
                 }
             }
         }

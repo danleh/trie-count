@@ -61,21 +61,21 @@ pub enum Node<T> {
     // TODO: Alternative design: allow interior nodes to have values.
 }
 
-// The `KeyStack` is essentially a lending iterator, because it returns a key representation
+// The `KeyStack` trait is essentially a lending iterator, because it returns a key representation
 // that can borrow not only from the trie, but also from the key stack itself.
-// I want to make this a trait, such that I can have multiple implementations, e.g., one where
-// the keys are not tracked at all (essentially nops, compiled away), and one where they are.
-// Unfortunately, this requires GATs (generic associated types), which even after stabilization
-// suffer from a serious compiler bug/limitation, namely that lifetime-GATs lead to an inferred
-// 'static bound for the closure type in the implementations below :(.
+// This is a trait with multiple implementations, e.g., one where the keys are not tracked at all
+// (essentially nops, optimized away), and one where keys are tracked in an auxiliary stack.
+// Unfortunately, this trait requires GATs (generic associated types), which even after 
+// stabilization suffer from a serious compiler bug/limitation, namely that lifetimes in GATs lead
+// to an inferred 'static bound for the closure type in the internal iterator functions below :(.
 // See https://blog.rust-lang.org/2022/10/28/gats-stabilization.html#implied-static-requirement-from-higher-ranked-trait-bounds
-// Hence, we rely on an encoding/polyfill of lifetime-GATs that work even before Rust 1.65
+// Hence, we rely on an encoding/polyfill of lifetime-GATs that work even before Rust 1.65 and
 // which actually do NOT suffer from this limitation!
 // See https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats
 // and https://github.com/danielhenrymantilla/nougat.rs.
 // I didn't want to  to include a whole dependency (nougat.rs) just for essentially two lines of
 // code (the additional trait and weird default type parameter), so I used the method described
-// by Sabrina Jewson. Great work and thanks to her for sharing this!
+// by Sabrina Jewson in her blog above. Great work and thanks to her for sharing this!
 // This trait is just to avoid duplicated implementations, so I did not use the sealed bounds
 // variant that she describes as well, since it adds even more complexity.
 pub trait KeyWithLifetime<'this, ImplicitBounds = &'this Self> {
@@ -83,7 +83,8 @@ pub trait KeyWithLifetime<'this, ImplicitBounds = &'this Self> {
 }
 
 pub trait KeyStack<'trie> : for<'any /* where Self: 'any */> KeyWithLifetime<'any> {
-    fn push_and_get_current<'temp>(&'temp mut self, key_part: &'trie str) -> <Self as KeyWithLifetime<'temp>>::Key;
+    fn push(&mut self, key_part: &'trie str);
+    fn get_current(&self) -> <Self as KeyWithLifetime>::Key;
     fn pop(&mut self);
 }
 
@@ -92,10 +93,8 @@ impl KeyWithLifetime<'_> for () {
     type Key = ();
 }
 impl KeyStack<'_> for () {
-    #[inline(always)]
-    fn push_and_get_current(&mut self, _: &str) {}
-
-    #[inline(always)]
+    fn push(&mut self, _: &str) {}
+    fn get_current(&self) {}
     fn pop(&mut self) {}
 }
 
@@ -106,19 +105,18 @@ impl<'this, 'trie> KeyWithLifetime<'this> for Vec<&'trie str> {
     type Key = &'this [&'trie str];
 }
 impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
-    #[inline(always)]
-    fn push_and_get_current<'temp>(&'temp mut self, key_part: &'trie str) -> <Self as KeyWithLifetime<'temp>>::Key {
+    fn push(&mut self, key_part: &'trie str) {
         self.push(key_part);
+    }
+    fn get_current(&self) -> <Self as KeyWithLifetime>::Key {
         self.as_slice()
     }
-
-    #[inline(always)]
     fn pop(&mut self) {
         self.pop();
     }
 }
 
-/// Trait for processing values, either both leafs and interior nodes, or only leafs.
+/// Trait for abstracting over values, either both leafs and interior nodes, or only leafs.
 pub trait Value<'trie, T> {
     const WITH_INTERIOR: bool;
     fn leaf(value: &'trie T) -> Self;
@@ -144,15 +142,11 @@ impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
 /// External pre-order depth-first iterator, configurable by `K` and `V`.
 pub struct Iter<'trie, T, K, V> {
     /// A worklist of nodes still to process.
-    node_stack: [MaybeUninit<&'trie Node<T>>; 1024],
-    len: usize,
+    /// `None` is used as a marker to indicate to pop the last element from the `key_parts_stack`.
+    node_stack: Vec<Option<&'trie Node<T>>>,
 
     /// The parts of the current key, as encountered along the spine of the tree.
     key_parts_stack: K,
-
-    /// A flag to indicate that we must next pop an element from the `key_parts_stack`.
-    /// This is equivalent to saying `last_returned_value_was_leaf`.
-    must_pop_key_part: bool,
 
     /// Statically encodes the value representation we want to return from the iterator.
     value_representation: PhantomData<V>,
@@ -166,63 +160,47 @@ where
     V: Value<'trie, T>,
 {
     pub fn new(root: &'trie Node<T>) -> Self {
-        let mut node_stack: [MaybeUninit<&'trie Node<T>>; 1024] = unsafe { MaybeUninit::uninit().assume_init() };
-        unsafe { node_stack.get_unchecked_mut(0).write(root); }
         Self {
-            node_stack,
-            len: 1,
+            node_stack: vec![Some(root)],
             key_parts_stack: K::default(),
-            must_pop_key_part: false,
             value_representation: PhantomData,
         }
     }
 
     #[allow(clippy::needless_lifetimes)]
     pub fn next<'next>(&'next mut self) -> Option<(<K as KeyWithLifetime<'next>>::Key, V)> {
-        while self.len > 0 {
-            self.len -= 1;
-            let cur_node = unsafe { self.node_stack.get_unchecked(self.len).assume_init() };
-
-            if self.must_pop_key_part {
-                self.key_parts_stack.pop();
-                self.must_pop_key_part = false;
-            }
+        while let Some(cur_node) = self.node_stack.pop() {
             match cur_node {
-                Node::Leaf { key_rest, value } => {
-                    // After the client code has processed the key of this leaf, we must pop the
-                    // last key part. However, once we have returned, we no longer have control to
-                    // do so, so we defer it via this flag until the next call to `next`.
-                    self.must_pop_key_part = true;
-                    
-                    let key = self.key_parts_stack.push_and_get_current(key_rest);
-                    return Some((key, V::leaf(value)));
-                },
-                Node::Interior { key_prefix, children } => {
+                Some(Node::Leaf { key_rest, value }) => {
+                    self.node_stack.push(None);
+                    self.key_parts_stack.push(key_rest);
+
+                    return Some((self.key_parts_stack.get_current(), V::leaf(value)));
+                }
+                Some(Node::Interior { key_prefix, children }) => {
+                    self.node_stack.push(None);
                     // Process the children next, i.e., depth-first traversal.
-                    for child in children.iter().rev() {
-                        unsafe { self.node_stack.get_unchecked_mut(self.len).write(child); }
-                        self.len += 1;
-                    }
+                    self.node_stack.extend(children.iter().rev().map(Some));
+                    self.key_parts_stack.push(key_prefix);
 
                     if V::WITH_INTERIOR {
-                        let key = self.key_parts_stack.push_and_get_current(key_prefix);
-                        return Some((key, V::interior()));
+                        return Some((self.key_parts_stack.get_current(), V::interior()));
                     }
-                },
+                }
+                None => self.key_parts_stack.pop(),
             }
         }
         None
     }
 }
 
-// ASCII Art of this trie:
-// "foo"
-// ├── "bar"
-// │   └── "" -> 0
-// │   └── "qux" -> 1
-// ├── "qux" -> 2
-// └── "" -> 3
-
+/// ASCII Art of this trie:
+/// "foo"
+/// ├── "bar"
+/// │   └── "" -> 0
+/// │   └── "qux" -> 1
+/// ├── "qux" -> 2
+/// └── "" -> 3
 #[cfg(test)]
 fn test_trie() -> Node<u32> {
     Node::Interior { 
@@ -245,10 +223,10 @@ fn test_trie() -> Node<u32> {
 fn test_iter_lending() {
     let root = test_trie();
     let mut iter = root.external_iter_items_leafs();
-    assert_eq!(iter.next(), Some((&["foo", "bar"][..], &0)));
+    assert_eq!(iter.next(), Some((&["foo", "bar", ""][..], &0)));
     assert_eq!(iter.next(), Some((&["foo", "bar", "qux"][..], &1)));
     assert_eq!(iter.next(), Some((&["foo", "qux"][..], &2)));
-    assert_eq!(iter.next(), Some((&["foo"][..], &3)));
+    assert_eq!(iter.next(), Some((&["foo", ""][..], &3)));
     assert_eq!(iter.next(), None);
 }
 
@@ -302,16 +280,14 @@ impl<T> Node<T> {
     {
         match self {
             Node::Leaf { key_rest, value } => {
-                let key = key_parts_stack.push_and_get_current(key_rest);
-                f(key, V::leaf(value));
+                key_parts_stack.push(key_rest);
+                f(key_parts_stack.get_current(), V::leaf(value));
                 key_parts_stack.pop();
             }
             Node::Interior { key_prefix, children } => {
-                let key = key_parts_stack.push_and_get_current(key_prefix);
+                key_parts_stack.push(key_prefix);
                 if V::WITH_INTERIOR {
-                    f(key, V::interior());
-                } else {
-                    drop(key);
+                    f(key_parts_stack.get_current(), V::interior());
                 }
                 for child in children {
                     child.internal_iter_generic(key_parts_stack, f);
@@ -347,8 +323,6 @@ impl<T> Node<T> {
     pub fn external_iter_values(&self) -> Iter<T, (), &T> {
         Iter::new(self)
     }
-
-    // TODO: add external iterator without keys, and with ony leafs.
 
     #[cfg(test)]
     fn to_test_string(&self) -> String

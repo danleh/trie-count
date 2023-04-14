@@ -38,7 +38,7 @@
 //     // }
 // }
 
-use std::{str::FromStr, hint::unreachable_unchecked, ops::Generator, mem::MaybeUninit};
+use std::{str::FromStr, hint::unreachable_unchecked, ops::Generator, mem::MaybeUninit, marker::PhantomData};
 
 use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 
@@ -141,9 +141,7 @@ impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
 
 
 
-/// Can be configured with:
-/// - `K` to enable/disable returning the key parts, and with which representation.
-/// - `V` to enable/disable returning interior nodes, and with which representation.
+/// External pre-order depth-first iterator, configurable by `K` and `V`.
 pub struct Iter<'trie, T, K, V> {
     /// A worklist of nodes still to process.
     node_stack: Vec<&'trie Node<T>>,
@@ -155,11 +153,12 @@ pub struct Iter<'trie, T, K, V> {
     /// This is equivalent to saying `last_returned_value_was_leaf`.
     must_pop_key_part: bool,
 
-    phantom: std::marker::PhantomData<V>,
+    /// Statically encodes the value representation we want to return from the iterator.
+    value_representation: PhantomData<V>,
 }
 
-/// Cannot implement the `Iterator` trait because `next` borrows from the iterator itself
-/// (when returning the key parts).
+// Cannot implement the `Iterator` trait from the standard library because `next` borrows from the
+// iterator itself (when returning the key parts).
 impl<'trie, T, K, V> Iter<'trie, T, K, V>
 where
     K: KeyStack<'trie> + Default,
@@ -170,7 +169,7 @@ where
             node_stack: vec![root],
             key_parts_stack: K::default(),
             must_pop_key_part: false,
-            phantom: std::marker::PhantomData,
+            value_representation: PhantomData,
         }
     }
 
@@ -229,21 +228,6 @@ pub fn external_iter_value_optimized_unsafe(node: &Node<i32>) -> impl Iterator<I
     })
 }
 
-#[inline(never)]
-pub fn internal_iter_value(node: &Node<i32>, mut f: impl FnMut(&i32)) {
-    fn internal_iter_value(node: &Node<i32>, f: &mut impl FnMut(&i32)) {
-        match node {
-            Node::Leaf { value, .. } => f(value),
-            Node::Interior { children, .. } => {
-                for child in children {
-                    internal_iter_value(child, f);
-                }
-            }
-        }
-    }
-    internal_iter_value(node, &mut f)
-}
-
 // ASCII Art of this trie:
 // "foo"
 // ├── "bar"
@@ -270,7 +254,6 @@ fn test_trie() -> Node<u32> {
     }
 }
 
-// FIXME
 #[test]
 fn test_iter_lending() {
     let root = test_trie();
@@ -281,29 +264,6 @@ fn test_iter_lending() {
     assert_eq!(iter.next(), Some((&["foo"][..], &3)));
     assert_eq!(iter.next(), None);
 }
-
-// #[test]
-// fn test_iter_key_parts_vec() {
-//     let root = test_trie();
-//     let mut iter = root.external_iter_key_parts();
-//     assert_eq!(iter.next(), Some((vec!["foo", "bar"], &0)));
-//     assert_eq!(iter.next(), Some((vec!["foo", "bar", "qux"], &1)));
-//     assert_eq!(iter.next(), Some((vec!["foo", "qux"], &2)));
-//     assert_eq!(iter.next(), Some((vec!["foo"], &3)));
-//     assert_eq!(iter.next(), None);
-// }
-
-// FIXME
-// #[test]
-// fn test_iter_key_string() {
-//     let root = test_trie();
-//     let mut iter = root.external_iter_key_parts().map(|(key_parts, value)| (key_parts.join(":"), value));
-//     assert_eq!(iter.next(), Some(("foobar".into(), &0)));
-//     assert_eq!(iter.next(), Some(("foobarqux".into(), &1)));
-//     assert_eq!(iter.next(), Some(("fooqux".into(), &2)));
-//     assert_eq!(iter.next(), Some(("foo".into(), &3)));
-//     assert_eq!(iter.next(), None);
-// }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum InsertResult<T> {
@@ -346,9 +306,7 @@ impl<T> Node<T> {
         }
     }
 
-    /// Generic depth-first traversal of the trie, configurable by:
-    /// - `K`: whether to track keys or not.
-    /// - `V`: whether to iterate over just leafs or interior nodes as well.
+    /// Generic interior pre-order depth-first traversal of the trie, configurable by `K` and `V`.
     fn internal_iter_generic<'trie, K, V, F>(&'trie self, key_parts_stack: &mut K, f: &mut F)
     where
         K: KeyStack<'trie>,
@@ -895,5 +853,4 @@ mod test {
 
     // TODO: unicode tests: smileys, German umlauts, etc.
     // TODO: counts, duplicate entries
-    // TODO: 
 }

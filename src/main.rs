@@ -100,7 +100,7 @@ fn main() -> anyhow::Result<()> {
 #[inline(never)]
 fn test_internal_iterator_specialization(root: &trie::Node<i32>) -> i32 {
     let mut sum = 0;
-    root.internal_iter_values_leafs(|value| sum += 17);
+    root.internal_iter_values(|value| sum += 17);
     sum
 }
 

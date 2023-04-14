@@ -419,7 +419,7 @@ impl<T> Node<T> {
     pub fn common_prefix(&self) -> &str {
         match self {
             Node::Leaf { key_rest, .. } => key_rest,
-            Node::Interior { key_prefix: key_common_prefix, .. } => key_common_prefix,
+            Node::Interior { key_prefix, .. } => key_prefix,
         }
     }
 
@@ -438,13 +438,9 @@ impl<T> Node<T> {
     }
 
     /// Generic depth-first traversal of the trie, configurable by:
-    /// - `K` whether to track keys or not.
-    /// to 
-    fn internal_iter_generic<'trie, K, V, F>(
-        &'trie self,
-        key_parts_stack: &mut K,
-        // TODO switch that to FnMut + Clone
-        f: &mut F)
+    /// - `K`: whether to track keys or not.
+    /// - `V`: whether to iterate over just leafs or interior nodes as well.
+    fn internal_iter_generic<'trie, K, V, F>(&'trie self, key_parts_stack: &mut K, f: &mut F)
     where
         K: KeyStack<'trie>,
         V: Value<'trie, T>,

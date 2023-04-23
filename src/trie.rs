@@ -138,7 +138,6 @@ impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
 }
 
 
-
 /// External pre-order depth-first iterator, configurable by `K` and `V`.
 pub struct Iter<'trie, T, K, V> {
     /// A worklist of nodes still to process.
@@ -250,7 +249,7 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn common_prefix(&self) -> &str {
+    pub fn key_part(&self) -> &str {
         match self {
             Node::Leaf { key_rest, .. } => key_rest,
             Node::Interior { key_prefix, .. } => key_prefix,
@@ -298,29 +297,38 @@ impl<T> Node<T> {
     }
 
     /// Depth-first traversal of the trie, including interior nodes, and with key parts.
+    /// The value passed to `f` is `None` for interior nodes and `Some(&T)` for leafs.
     pub fn internal_iter_items(&self, mut f: impl FnMut(/* key_parts */ &[&str], /* value */ Option<&T>)) {
         self.internal_iter_generic(&mut Vec::new(), &mut f);
     }
 
     /// Depth-first traversal of the trie, _not_ including interior nodes, and with key parts.
+    /// Since `f` is only called for leafs, the passed value is always a valid `&T`.
     pub fn internal_iter_items_leafs(&self, mut f: impl FnMut(/* key_parts */ &[&str], /* value */ &T)) {
         self.internal_iter_generic(&mut Vec::new(), &mut f);
     }
 
-    /// Depth-first traversal of the trie, but without key parts, thus returning only the values of leafs.
+    /// Depth-first traversal of the trie, without key parts.
+    /// Since interior nodes have no value associated with them, they are not included.
     pub fn internal_iter_values(&self, mut f: impl FnMut(/* value */ &T)) {
         self.internal_iter_generic(&mut (), &mut |(), value| f(value));
     }
 
-    pub fn external_iter_items(&self) -> Iter<T, Vec<&str>, Option<&T>> {
+    /// Returns a depth-first iterator over the trie, including interior nodes, and with key parts.
+    /// The iterator item is `None` for interior nodes and `Some(&T)` for leafs.
+    pub fn external_iter_items(&self) -> Iter<T, /* key_parts_stack */ Vec<&str>, Option<&T>> {
         Iter::new(self)
     }
 
-    pub fn external_iter_items_leafs(&self) -> Iter<T, Vec<&str>, &T> {
+    /// Returns a depth-first iterator over the trie, _not_ including interior nodes, and with key parts.
+    /// Since the iterator includes only leafs, the returned value is always a valid `&T`.
+    pub fn external_iter_items_leafs(&self) -> Iter<T, /* key_parts_stack */ Vec<&str>, &T> {
         Iter::new(self)
     }
 
-    pub fn external_iter_values(&self) -> Iter<T, (), &T> {
+    /// Returns a depth-first iterator over the trie, without key parts.
+    /// Since interior nodes have no value associated with them, they are not included.
+    pub fn external_iter_values(&self) -> Iter<T, /* no key_parts_stack */ (), &T> {
         Iter::new(self)
     }
 
@@ -548,7 +556,7 @@ impl<T> Node<T> {
             common_prefix, 
             left_rest: self_rest,
             right_rest: key_rest
-        } = split_prefix_rest(self.common_prefix(), key, split_points);
+        } = split_prefix_rest(self.key_part(), key, split_points);
 
         // No common prefix, so cannot insert into this sub-trie.
         if common_prefix.is_empty() {

@@ -526,16 +526,16 @@ impl<T> Node<T> {
 
     /// Returns `Some(T)` if there is a value associated with the exact given key, 
     /// or `None` if no such value exists.
-    fn find_exact(&self, key_query: &str) -> Option<&T> {
+    pub fn get_exact<'trie>(&'trie self, key_query: &'_ str) -> Option<&'trie T> {
         match self {
             Node::Leaf { key_rest, value } =>
                 if &key_rest[..] == key_query {
                     return Some(value)
                 },
             Node::Interior { key_prefix, children } => 
-                if let Some(key_query_rest) = key_query.strip_prefix(&key_prefix[..]) {
+                if let Some(key_query) = key_query.strip_prefix(&key_prefix[..]) {
                     for child in children {
-                        if let Some(value) = child.find_exact(key_query_rest) {
+                        if let Some(value) = child.get_exact(key_query) {
                             return Some(value);
                         }
                     }
@@ -544,51 +544,59 @@ impl<T> Node<T> {
         None
     }
 
-    /// Returns the first value `Some(T)` for which the given key is a prefix,
+    /// Returns the first value for which the given `key_query` is a prefix of the full key, 
     /// or `None` if no such value exists.
-    fn find_first_with_prefix(&self, key_query_prefix: &str) -> Option<&T> {
-        match self {
-            Node::Leaf { key_rest, value } =>
-                // If `key_prefix.is_empty()`, then `key_rest.starts_with(key_prefix)` is always true.
-                if key_rest.starts_with(key_query_prefix) {
-                    return Some(value)
-                },
-            Node::Interior { key_prefix, children } => 
-                if let Some(key_query_rest) = key_query_prefix.strip_prefix(&key_prefix[..]) {
-                    for child in children {
-                        if let Some(value) = child.find_first_with_prefix(key_query_rest) {
-                            return Some(value);
-                        }
-                    }
+    /// Also returns the key.
+    pub fn get_first_with_prefix<'trie>(&'trie self, key_query: &'_ str) -> Option<(/* key */ String, &'trie T)> {
+        if let Some((key_matched, subtrie)) = self.get_all_with_prefix(key_query) {
+            if let Some((key_parts, value)) = subtrie.external_iter_items_leafs().next() {
+                // I would hope that the string allocation and concetenation is optimized away
+                // if the caller does not use the key, but I am not sure.
+                let mut key = key_matched.to_owned();
+                for part in key_parts {
+                    key.push_str(part);
                 }
+                return Some((key, value));
+            }
         }
         None
     }
 
-    /// Returns a subtrie for which the given key is a prefix, or the empty trie if there are no
-    /// values associated with the given key prefix.
-    /// You can obtain the values and keys by iterating over the returned subtrie.
-    fn find_all_with_prefix(&self, key_query_prefix: &str) -> &Node<T> {
-        match self {
-            Node::Leaf { key_rest, value } =>
-                if key_rest.starts_with(key_query_prefix) {
-                    return self
-                },
-            Node::Interior { key_prefix, children } =>
-                if let Some(key_query_rest) = key_query_prefix.strip_prefix(&key_prefix[..]) {
-                    // TODO
-                }
+    /// Returns the subtrie for which the given `key_query` is a prefix of the contained keys,
+    /// or `None` if none with this prefix exists.
+    /// Also returns the part of the key that was matched by parent nodes of the returned subtrie,
+    /// i.e., you can concatenate it with the key parts in the returned subtrie to obtain the full keys.
+    pub fn get_all_with_prefix<'trie, 'query>(&'trie self, key_query: &'query str) 
+    -> Option<(/* key_matched */ &'query str, /* matching_subtrie */ &'trie Node<T>)> {
+        fn get_all_with_prefix<'trie, T>(cur_node: &'trie Node<T>, key_query: &'_ str, key_matched_len: usize) 
+        -> Option<(/* key_matched_len */ usize, /* matching_subtrie */ &'trie Node<T>)> {
+            match cur_node {
+                Node::Leaf { key_rest, value } =>
+                    if key_rest.starts_with(key_query) {
+                        return Some((key_matched_len, cur_node))
+                    },
+                Node::Interior { key_prefix, children } =>
+                    match split_prefix_rest(key_query, &key_prefix[..], str::char_indices) {
+                        // The queried key was fully a prefix of the current node, so return the whole subtrie.
+                        SplitResult { common_prefix: _, left_rest: "", right_rest: _ } =>
+                            return Some((key_matched_len, cur_node)),
+                        // The current node "consumed" a prefix of the queried key, so search further in the children.
+                        SplitResult { common_prefix, left_rest: key_query, right_rest: "" } =>
+                            for child in children {
+                                if let Some((key_matched_len, node)) = get_all_with_prefix(child, key_query, key_matched_len + common_prefix.len()) {
+                                    return Some((key_matched_len, node));
+                                }
+                            },
+                        // Both have a non-empty rest after splitting off the `common_prefix`, 
+                        // so neither was a prefix of the other, hence stop the search.
+                        SplitResult { .. } => return None
+                    }
+            }
+            None
         }
-
-        static BOX_STR: Vec<&str> = Vec::new();
-
-        todo!()
-        // &Node::Interior { key_prefix: "".into(), children: Vec::new() }
+        get_all_with_prefix(self, key_query, 0)
+            .map(|(key_matched_len, subtrie)| (&key_query[..key_matched_len], subtrie))
     }
-
-//     fn iter_with_prefix(&self, key: &str) -> impl Iterator<Item=(&str, &T)> {
-//         todo!()
-//    }
 
     fn insert(&mut self, key: &str, value: T) -> InsertResult<T> {
         fn split_points(s: &str) -> GraphemeIndices {
@@ -799,6 +807,42 @@ mod test {
             left_rest: "",
             right_rest: "🇪🇺",
         }, "unicode country flags");
+    }
+
+    #[test]
+    fn test_get_all_with_prefix() {
+        let root = test_trie();
+
+        assert_eq!(root.get_all_with_prefix("fooqux"), Some(("foo", (&Node::Leaf {
+            key_rest: "qux".into(),
+            value: 2,
+        }))));
+
+        assert_eq!(root.get_all_with_prefix("foobarqux"), Some(("foobar", (&Node::Leaf {
+            key_rest: "qux".into(),
+            value: 1,
+        }))));
+        
+        assert_eq!(root.get_all_with_prefix("xyz"), None);
+        
+        assert_eq!(root.get_all_with_prefix("foobarqXYZ"), None);
+        assert_eq!(root.get_all_with_prefix("fooo"), None);
+        assert_eq!(root.get_all_with_prefix("fo"), Some(("", &root)));
+        assert_eq!(root.get_all_with_prefix(""), Some(("", &root)));
+    }
+
+    #[test]
+    fn test_get_first_with_prefix() {
+        let root = test_trie();
+
+        assert_eq!(root.get_first_with_prefix(""), Some(("foobar".into(), &0)));
+        assert_eq!(root.get_first_with_prefix("fo"), Some(("foobar".into(), &0)));
+        assert_eq!(root.get_first_with_prefix("foob"), Some(("foobar".into(), &0)));
+        assert_eq!(root.get_first_with_prefix("foobar"), Some(("foobar".into(), &0)));
+        assert_eq!(root.get_first_with_prefix("foobarxyz"), None);
+        assert_eq!(root.get_first_with_prefix("foobarqux"), Some(("foobarqux".into(), &1)));
+        assert_eq!(root.get_first_with_prefix("fooqux"), Some(("fooqux".into(), &2)));
+        assert_eq!(root.get_first_with_prefix("fooxyz"), None);
     }
 
     #[test]

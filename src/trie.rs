@@ -524,22 +524,66 @@ impl<T> Node<T> {
 //         return true;
 //     }
 
-    fn get(&self, key: &str) -> Option<&T> {
+    /// Returns `Some(T)` if there is a value associated with the exact given key, 
+    /// or `None` if no such value exists.
+    fn find_exact(&self, key_query: &str) -> Option<&T> {
         match self {
             Node::Leaf { key_rest, value } =>
-                if &key_rest[..] == key {
+                if &key_rest[..] == key_query {
                     return Some(value)
                 },
             Node::Interior { key_prefix, children } => 
-                if let Some(key_rest) = key.strip_prefix(&key_prefix[..]) {
+                if let Some(key_query_rest) = key_query.strip_prefix(&key_prefix[..]) {
                     for child in children {
-                        if let Some(value) = child.get(key_rest) {
+                        if let Some(value) = child.find_exact(key_query_rest) {
                             return Some(value);
                         }
                     }
                 }
         }
         None
+    }
+
+    /// Returns the first value `Some(T)` for which the given key is a prefix,
+    /// or `None` if no such value exists.
+    fn find_first_with_prefix(&self, key_query_prefix: &str) -> Option<&T> {
+        match self {
+            Node::Leaf { key_rest, value } =>
+                // If `key_prefix.is_empty()`, then `key_rest.starts_with(key_prefix)` is always true.
+                if key_rest.starts_with(key_query_prefix) {
+                    return Some(value)
+                },
+            Node::Interior { key_prefix, children } => 
+                if let Some(key_query_rest) = key_query_prefix.strip_prefix(&key_prefix[..]) {
+                    for child in children {
+                        if let Some(value) = child.find_first_with_prefix(key_query_rest) {
+                            return Some(value);
+                        }
+                    }
+                }
+        }
+        None
+    }
+
+    /// Returns a subtrie for which the given key is a prefix, or the empty trie if there are no
+    /// values associated with the given key prefix.
+    /// You can obtain the values and keys by iterating over the returned subtrie.
+    fn find_all_with_prefix(&self, key_query_prefix: &str) -> &Node<T> {
+        match self {
+            Node::Leaf { key_rest, value } =>
+                if key_rest.starts_with(key_query_prefix) {
+                    return self
+                },
+            Node::Interior { key_prefix, children } =>
+                if let Some(key_query_rest) = key_query_prefix.strip_prefix(&key_prefix[..]) {
+                    // TODO
+                }
+        }
+
+        static BOX_STR: Vec<&str> = Vec::new();
+
+        todo!()
+        // &Node::Interior { key_prefix: "".into(), children: Vec::new() }
     }
 
 //     fn iter_with_prefix(&self, key: &str) -> impl Iterator<Item=(&str, &T)> {

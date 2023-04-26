@@ -617,7 +617,7 @@ impl<T> Node<T> {
         }
     }
 
-    fn insert(&mut self, insert_key: &str, insert_value: T) -> InsertResult<T> {
+    pub fn insert(&mut self, insert_key: &str, insert_value: T) -> InsertResult<T> {
         fn insert<const IS_ROOT: bool, T>(cur_node: &mut Node<T>, insert_key: &str, insert_value: T) -> InsertResult<T> {
             match cur_node {
                 Node::Leaf { key_rest: self_key, value } => {
@@ -652,6 +652,19 @@ impl<T> Node<T> {
             }
         }
         insert::<true, T>(self, insert_key, insert_value)
+    }
+
+    #[cfg(test)]
+    fn assert_no_empty_interior_nodes(&self) {
+        fn assert_no_empty_interior_nodes<const IS_ROOT: bool, T>(cur_node: &Node<T>) {
+            if let Node::Interior { key_prefix, children } = cur_node {
+                assert!(IS_ROOT || !key_prefix.is_empty(), "interior node with empty key, only the root node is allowed to have an empty key");
+                for child in children {
+                    assert_no_empty_interior_nodes::<false, T>(child);
+                }
+            }
+        }
+        assert_no_empty_interior_nodes::<true, T>(self);
     }
 }
 

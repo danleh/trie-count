@@ -714,6 +714,7 @@ impl<T> Node<T> {
             match cur_node {
                 Node::Leaf { key_rest: _, value } => f_leaf(value),
                 Node::Interior { key_prefix: _, children } => {
+                    // FIXME: Allow an empty trie at the root.
                     children.iter().map(|child| fold(child, f_leaf, f_interior)).reduce(f_interior).expect("empty trie")
                 }
             }

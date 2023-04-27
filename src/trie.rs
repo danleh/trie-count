@@ -38,7 +38,7 @@
 //     // }
 // }
 
-use std::{str::FromStr, hint::unreachable_unchecked, ops::Generator, mem::MaybeUninit, marker::PhantomData};
+use std::{str::FromStr, hint::unreachable_unchecked, ops::Generator, mem::MaybeUninit, marker::PhantomData, cmp::Ordering, iter::Sum};
 
 use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 
@@ -598,7 +598,7 @@ impl<T> Node<T> {
             .map(|(key_matched_len, subtrie)| (&key_query[..key_matched_len], subtrie))
     }
 
-    // Inserts a fresh interior node, of which the old `self` will become a child. That is, go from:
+    // Inserts a fresh interior node of which the old `self` will become a child. That is, go from:
     //  self
     // to:
     //  Node::Interior { interior_key, children: [self, other_children...] }
@@ -655,17 +655,133 @@ impl<T> Node<T> {
     }
 
     #[cfg(test)]
-    fn assert_no_empty_interior_nodes(&self) {
-        fn assert_no_empty_interior_nodes<const IS_ROOT: bool, T>(cur_node: &Node<T>) {
+    fn assert_invariants(&self) {
+        fn assert_invariants<const IS_ROOT: bool, T>(cur_node: &Node<T>) {
             if let Node::Interior { key_prefix, children } = cur_node {
-                assert!(IS_ROOT || !key_prefix.is_empty(), "interior node with empty key, only the root node is allowed to have an empty key");
+                if !IS_ROOT {
+                    assert!(!key_prefix.is_empty(), "invariant violated: only the root node is allowed to have an empty interior key");
+                    assert!(children.len() > 1, "invariant violated: interior nodes must have at least two children");
+                }
                 for child in children {
-                    assert_no_empty_interior_nodes::<false, T>(child);
+                    assert_invariants::<false, T>(child);
                 }
             }
         }
-        assert_no_empty_interior_nodes::<true, T>(self);
+        assert_invariants::<true, T>(self);
     }
+
+    /// Sorts the children alphabetically by their key.
+    pub fn sort_by_key(&mut self) {
+        if let Node::Interior { key_prefix, children } = self {
+            for child in children.iter_mut() {
+                child.sort_by_key();
+            }
+            children.sort_by(|a, b| a.key_part().cmp(b.key_part()));
+        }
+    }
+
+    /// Sorts the trie by the result of the given function applied to each node.
+    pub fn sort_by_func<F, O>(&mut self, mut f: F)
+    where
+        F: FnMut(&Node<T>) -> O,
+        O: Ord,
+    {
+        fn sort_by_func<T, F, O>(cur_node: &mut Node<T>, f: &mut F)
+        where
+            F: FnMut(&Node<T>) -> O,
+            O: Ord,
+        {
+            if let Node::Interior { key_prefix: _, children } = cur_node {
+                for child in children.iter_mut() {
+                    sort_by_func(child, f);
+                }
+                children.sort_by_cached_key(f);
+            }
+        }
+        sort_by_func(self, &mut f);
+    }
+
+    pub fn fold<F, G, U>(&self, mut f_leaf: F, f_interior: G) -> U
+    where
+        F: FnMut(&T) -> U,
+        G: Fn(U, U) -> U,
+    {
+        fn fold<T, F, G, U>(cur_node: &Node<T>, f_leaf: &mut F, f_interior: &G) -> U
+        where
+            F: FnMut(&T) -> U,
+            G: Fn(U, U) -> U,
+        {
+            match cur_node {
+                Node::Leaf { key_rest: _, value } => f_leaf(value),
+                Node::Interior { key_prefix: _, children } => {
+                    children.iter().map(|child| fold(child, f_leaf, f_interior)).reduce(f_interior).expect("empty trie")
+                }
+            }
+        }
+        fold::<T, F, G, U>(self, &mut f_leaf, &f_interior)
+    }
+
+    pub fn value_sum(&self) -> T
+    where
+        T: Sum + Copy
+    {
+        match self {
+            Node::Leaf { key_rest: _, value } => *value,
+            Node::Interior { key_prefix: _, children } => children.iter().map(Node::value_sum).sum()
+        }
+    }
+
+    // pub fn sort_by_value_sum(&mut self)
+    // where
+    //     T: Ord + Sum + Copy
+    // {
+    //     fn sort_by_value_sum<T>(cur_node: &mut Node<T>) -> T
+    //     where
+    //         T: Ord + Sum + Copy
+    //     {
+    //         match cur_node {
+    //             Node::Leaf { key_rest: _, value } => *value,
+    //             Node::Interior { key_prefix: _, children } => {
+    //                 let sums: Vec<T> = children.iter_mut().map(|child| sort_by_value_sum(child)).collect();
+    //                 children.sort_by_cached_key(|node| sort_by_value_sum(node));
+    //                 sums.into_iter().sum()
+    //             }
+    //         }
+    //     }
+    //     sort_by_value_sum(self);
+    // }
+
+    // pub fn sort_by_bottomup_value_fold<F, G, O>(&mut self, mut f_leaf: F, mut f_interior: G)
+    // where
+    //     F: FnMut(&T) -> O,
+    //     G: FnMut(O, O) -> O,
+    //     O: Ord,
+    // {
+    //     fn sort_by_bottomup_value_fold<T, F, G, O>(cur_node: &mut Node<T>, f_leaf: &mut F, f_interior: &mut G) -> O
+    //     where
+    //         F: FnMut(&T) -> O,
+    //         G: FnMut(O, O) -> O,
+    //         O: Ord,
+    //     {
+    //         match cur_node {
+    //             Node::Leaf { key_rest: _, value } => f_leaf(value),
+    //             Node::Interior { key_prefix: _, children } => {
+    //                 let o = {
+    //                     let (first_child, children) = children.split_first_mut().unwrap();
+    //                     let mut o = sort_by_bottomup_value_fold(first_child, f_leaf, f_interior);
+    //                     for child in children.iter_mut() {
+    //                         let next_o = sort_by_bottomup_value_fold(child, f_leaf, f_interior);
+    //                         o = f_interior(o, next_o);
+    //                     }
+    //                     o
+    //                 };
+    //                 children.sort_by_cached_key(|child| sort_by_bottomup_value_fold(child, f_leaf, f_interior));
+    //                 o
+    //             }
+    //         }
+    //     }
+    //     sort_by_bottomup_value_fold::<T, F, G, O>(self, &mut f_leaf, &mut f_interior);
+    // }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -705,7 +821,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::assert_matches::assert_matches;
+    use std::{assert_matches::assert_matches, cmp::Reverse};
 
     use super::*;
 
@@ -880,6 +996,45 @@ mod test {
     // TODO test_insert_split_interior
     // TODO test_insert_into_empty_interior
 
+    #[test]
+    fn test_sort_by_key() {
+        let mut root: Node<i32> = Node::from_test_string(r#""foo"
+  "qux":1
+  "bar":2"#);
+        root.sort_by_key();
+        assert_eq!(root, Node::from_test_string(r#""foo"
+  "bar":2
+  "qux":1"#));
+
+        let mut root: Node<i32> = Node::from_test_string(r#""foo"
+  "bar":1
+  "":2"#);
+        root.sort_by_key();
+        assert_eq!(root, Node::from_test_string(r#""foo"
+  "":2
+  "bar":1"#));
+    }
+
+    #[test]
+    fn test_sort_by_value() {
+        let mut root: Node<i32> = Node::from_test_string(r#""foo"
+  "":2
+  "bar"
+    "":4
+    "zaz":3
+  "qux":1"#);
+        root.sort_by_func(|node| match node {
+            // Normally, None is sorted before Some, but we want it the other way around.
+            Node::Leaf { value, .. } => Reverse(Some(Reverse(*value))),
+            Node::Interior { .. } => Reverse(None),
+        });
+        assert_eq!(root, Node::from_test_string(r#""foo"
+  "qux":1
+  "":2
+  "bar"
+    "zaz":3
+    "":4"#));
+    }
+
     // TODO: unicode tests: smileys, German umlauts, etc.
-    // TODO: counts, duplicate entries
 }

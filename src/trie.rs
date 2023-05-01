@@ -285,7 +285,7 @@ impl<T> Node<T> {
     }
 
     // No constructor for interior nodes, because they are only created when splitting nodes.
-    // Check `split_node` for details.
+    // Check `splice_interior` for details.
 
 
     // Accessors:
@@ -500,24 +500,6 @@ impl<T> Node<T> {
 //     }
 
 //     fn try_insert(&mut self, str: &str, tokenize_at: Option<char>) -> bool {
-//         let mut common_prefix_len = self.common_prefix
-//             // Iterate over unicode scalar values in prefix and input in lock-step.
-//             .char_indices()
-//             .zip(str.chars())
-//             // Stop at the first character difference.
-//             .find(|((_, c1), c2)| c1 != c2)
-//             // Return the prefix up to the difference...
-//             .map(|((byte_pos, _), _)| byte_pos)
-//             // ...or the whole string (actually, the shorter of the two), if no difference was found.
-//             .unwrap_or(std::cmp::min(self.common_prefix.len(), str.len()));
-
-//         // If the tokenize option is set, only allow "breaks" (i.e., split between prefix and rest)
-//         // after said token. Since we already found a common prefix, we can short it to just end
-//         // after the token.
-//         if let Some(token) = tokenize_at {
-//             common_prefix_len = str[..common_prefix_len].rfind(token).map_or(0, |pos| pos+1);
-//         }
-
 //         let (common_prefix, rest) = str.split_at(common_prefix_len);
 
 //         // Insertion case A)
@@ -566,6 +548,9 @@ impl<T> Node<T> {
 //         ];
 //         return true;
 //     }
+
+
+    // Finding, inserting, and removing key value mappings:
 
     /// Returns `Some(T)` if there is a value associated with the exact given key, 
     /// or `None` if no such value exists.
@@ -710,19 +695,16 @@ impl<T> Node<T> {
     }
 
     #[cfg(test)]
-    fn assert_invariants(&self) {
-        fn assert_invariants<const IS_ROOT: bool, T>(cur_node: &Node<T>) {
-            if let Node::Interior { key_prefix, children } = cur_node {
-                if !IS_ROOT {
-                    assert!(!key_prefix.is_empty(), "invariant violated: only the root node is allowed to have an empty interior key");
-                    assert!(children.len() > 1, "invariant violated: interior nodes must have at least two children");
-                }
-                for child in children {
-                    assert_invariants::<false, T>(child);
-                }
+    fn assert_invariants<const IS_ROOT: bool>(&self) {
+        if let Node::Interior { key_prefix, children } = self {
+            if !IS_ROOT {
+                assert!(!key_prefix.is_empty(), "invariant violated: only the root node is allowed to have an empty interior key");
+                assert!(children.len() > 1, "invariant violated: interior nodes must have at least two children");
+            }
+            for child in children {
+                child.assert_invariants::<false>();
             }
         }
-        assert_invariants::<true, T>(self);
     }
 
     /// Sorts the children alphabetically by their key.
@@ -900,6 +882,21 @@ mod test {
         let string = expected.to_test_string();
         let actual = Node::from_test_string(&string);
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_len_and_is_empty() {
+        let root: Node<u32> = Node::new_root();
+        assert_eq!(root.len(), 0);
+        assert!(root.is_empty());
+
+        let root = Node::new_leaf("foobar", 42);
+        assert_eq!(root.len(), 1);
+        assert!(!root.is_empty());
+
+        let root = test_trie();
+        assert_eq!(root.len(), 4);
+        assert!(!root.is_empty());
     }
 
     #[test]

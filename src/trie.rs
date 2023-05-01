@@ -3,16 +3,35 @@
 // and https://github.com/miedzinski/prefix-tree
 // and https://en.wikipedia.org/wiki/Radix_tree
 
-// TODO generalize over generic sequences of T, and values V (instead of str, usize)
+use std::{str::FromStr, hint::unreachable_unchecked, ops::Generator, mem::MaybeUninit, marker::PhantomData, cmp::Ordering, iter::Sum};
 
-// #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-// pub struct Trie {
-//     root: Node,
-//     // See `Node::try_insert`.
-//     tokenize_at: Vec<char>
-// }
+use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 
-// impl Trie {
+// TODO generalize over generic sequences of K (e.g., bytes) instead of just `&str`.
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Trie<T, F> {
+    root: Node<T>,
+    /// Determines at which points the key string may be split, e.g., only at '/', only at 
+    /// unicode grapheme cluster boundaries, or at any character boundary.
+    key_split_points: F,
+}
+
+impl<T, F, I, P> Trie<T, F>
+where
+    F: Fn(&str) -> I,
+    I: Iterator<Item = (usize, P)>,
+    P: PartialEq
+{
+    pub fn new(key_split_points: F) -> Self {
+        Self {
+            root: Node::Interior {
+                key_prefix: "".into(),
+                children: Vec::new(),
+            },
+            key_split_points,
+        }
+    }
 
 //     pub fn by_levels(&self) -> Vec<(&str, usize)> {
 //         todo!()
@@ -36,11 +55,7 @@
 //     // pub fn graphviz(&self) -> String {
 //     //     todo!()
 //     // }
-// }
-
-use std::{str::FromStr, hint::unreachable_unchecked, ops::Generator, mem::MaybeUninit, marker::PhantomData, cmp::Ordering, iter::Sum};
-
-use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Node<T> {
@@ -630,7 +645,8 @@ impl<T> Node<T> {
                         // Only the root node is allowed to have an empty interior key,
                         // in all other cases we hand back to the parent, which shall try to insert somewhere else.
                         // In case of the root node, this will always be false and hence fall through to the next match arm
-                        // (which will then split the root node, potentially introducing a root with an empty key).
+                        // (which will then split the root node, potentially introducing a root with
+                        // an empty key, which is allowed).
                         SplitResult { common_prefix: "", left_rest: self_key_rest, right_rest: insert_key_rest } if !IS_ROOT => {
                             InsertResult::NoPrefix { value: insert_value }
                         }
@@ -640,18 +656,29 @@ impl<T> Node<T> {
                             let common_prefix = common_prefix.into();
                             let insert_key_rest = insert_key_rest.into();
                             *self_key = self_key_rest.into();
-                            cur_node.splice_interior(common_prefix, [Node::Leaf { key_rest: insert_key_rest, value: insert_value }]);
+                            let insert_new_leaf = Node::Leaf { key_rest: insert_key_rest, value: insert_value };
+                            cur_node.splice_interior(common_prefix, [insert_new_leaf]);
                             InsertResult::Ok
                         }
                     }
                 }
                 Node::Interior { key_prefix, children } => {
-                    todo!()
                     // call insert with IS_ROOT=false on the children, then check for NoPrefix
+                    match split_prefix_rest(insert_key, &key_prefix[..], str::char_indices) {
+                        // The insertion key is equal to the current node's key, so replace the value.
+                        // SplitResult { common_prefix: _, left_rest: "", right_rest: "" } => {
+                        // }
+                        _ => todo!()
+                    }
                 }
             }
         }
         insert::<true, T>(self, insert_key, insert_value)
+    }
+
+    pub fn remove_exact(&mut self, remove_key: &str) -> Option<T> {
+        // TODO: Based on code for `get_exact`. Maybe refactor into a common function that returns a `&mut Node<T>`?
+        todo!()
     }
 
     #[cfg(test)]
@@ -792,11 +819,11 @@ struct SplitResult<'a> {
     right_rest: &'a str,
 }
 
-fn split_prefix_rest<'a, F, I, T>(left: &'a str, right: &'a str, split_points: F) -> SplitResult<'a>
+fn split_prefix_rest<'a, F, I, P>(left: &'a str, right: &'a str, split_points: F) -> SplitResult<'a>
 where
     F: Fn(&'a str) -> I,
-    I: Iterator<Item = (usize, T)>,
-    T: PartialEq
+    I: Iterator<Item = (usize, P)>,
+    P: PartialEq
 {
     let left_iter = split_points(left);
     let right_iter = split_points(right);

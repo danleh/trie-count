@@ -42,6 +42,14 @@ where
         self.root = Node::new_root();
     }
 
+    pub fn insert(&mut self, key: &str, value: T) -> Option<T> {
+        match self.root.insert::<true>(key, value) {
+            InsertResult::Ok => None,
+            InsertResult::Replaced { old_value } => Some(old_value),
+            InsertResult::NoPrefix { .. } => unreachable!("not possible when inserting into the root node"),
+        }
+    }
+
 //     pub fn by_levels(&self) -> Vec<(&str, usize)> {
 //         todo!()
 //     }
@@ -270,6 +278,7 @@ impl<T> Node<T> {
 
     // Constructors:
 
+    // TODO: Replace all `Node::Leaf { .. }` with `Node::new_leaf(..)`.
     pub fn new_leaf(str: &str, value: T) -> Self {
         Node::Leaf {
             key_rest: str.into(),
@@ -603,8 +612,8 @@ impl<T> Node<T> {
                     if key_rest.starts_with(key_query) {
                         return Some((key_matched_len, cur_node))
                     },
-                Node::Interior { key_prefix, children } =>
-                    match split_prefix_rest(key_query, &key_prefix[..], str::char_indices) {
+                Node::Interior { key_prefix: self_key, children } =>
+                    match split_prefix_rest(key_query, self_key, str::char_indices) {
                         // The queried key was fully a prefix of the current node, so return the whole subtrie.
                         SplitResult { common_prefix: _, left_rest: "", right_rest: _ } =>
                             return Some((key_matched_len, cur_node)),
@@ -636,7 +645,7 @@ impl<T> Node<T> {
             children: Vec::with_capacity(N+1),
         };
         let old_self = std::mem::replace(self, new_interior);
-        match self {
+        match self /* == new_interior */ {
             Node::Interior { children, .. } => {
                 children.push(old_self);
                 children.extend(other_children.into_iter());
@@ -645,48 +654,106 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn insert(&mut self, insert_key: &str, insert_value: T) -> InsertResult<T> {
-        fn insert<const IS_ROOT: bool, T>(cur_node: &mut Node<T>, insert_key: &str, insert_value: T) -> InsertResult<T> {
-            match cur_node {
-                Node::Leaf { key_rest: self_key, value } => {
-                    match split_prefix_rest(self_key, insert_key, str::char_indices) {
-                        // The insertion key is equal to the current node's key, so replace the value.
-                        SplitResult { common_prefix: _, left_rest: "", right_rest: "" } => {
-                            let old_value = std::mem::replace(value, insert_value);
-                            InsertResult::Replaced { old_value }
-                        }
-                        // Only the root node is allowed to have an empty interior key,
-                        // in all other cases we hand back to the parent, which shall try to insert somewhere else.
-                        // In case of the root node, this will always be false and hence fall through to the next match arm
-                        // (which will then split the root node, potentially introducing a root with
-                        // an empty key, which is allowed).
-                        SplitResult { common_prefix: "", left_rest: self_key_rest, right_rest: insert_key_rest } if !IS_ROOT => {
-                            InsertResult::NoPrefix { value: insert_value }
-                        }
-                        // Split this node into an interior node with the common prefix as key,
-                        // and two leaf nodes as children, one for self's old value and one for the inserted value.
-                        SplitResult { common_prefix, left_rest: self_key_rest, right_rest: insert_key_rest } => {
-                            let common_prefix = common_prefix.into();
-                            let insert_key_rest = insert_key_rest.into();
-                            *self_key = self_key_rest.into();
-                            let insert_new_leaf = Node::Leaf { key_rest: insert_key_rest, value: insert_value };
-                            cur_node.splice_interior(common_prefix, [insert_new_leaf]);
-                            InsertResult::Ok
-                        }
+    pub fn insert<const IS_ROOT: bool>(&mut self, insert_key: &str, insert_value: T) -> InsertResult<T> {
+        match self {
+            Node::Leaf { key_rest: self_key, value } => {
+                match split_prefix_rest(insert_key, self_key, str::char_indices) {
+                    // The insertion key is equal to the current node's key, so replace the value.
+                    SplitResult { common_prefix: _, left_rest: "", right_rest: "" } => {
+                        let old_value = std::mem::replace(value, insert_value);
+                        InsertResult::Replaced { old_value }
                     }
-                }
-                Node::Interior { key_prefix, children } => {
-                    // call insert with IS_ROOT=false on the children, then check for NoPrefix
-                    match split_prefix_rest(insert_key, &key_prefix[..], str::char_indices) {
-                        // The insertion key is equal to the current node's key, so replace the value.
-                        // SplitResult { common_prefix: _, left_rest: "", right_rest: "" } => {
-                        // }
-                        _ => todo!()
+                    // The insertion key and the current node's key don't have a common prefix,
+                    // now it depends whether this insertion is "allowed" or not:
+                    // Only the root node is allowed to have an empty interior key,
+                    // in all other cases we hand back to the parent, which shall try to insert somewhere else.
+                    // In case of the root node, the match guard will always be false and hence fall through
+                    // to the next match arm (which will then split the root node, 
+                    // potentially introducing a root with an empty key, which is allowed).
+                    SplitResult { common_prefix: "", left_rest: insert_key_rest, right_rest: self_key_rest } if !IS_ROOT => {
+                        InsertResult::NoPrefix { value: insert_value }
+                    }
+                    // Split this node into an interior node with the common prefix as key,
+                    // and two leaf nodes as children, one for self's old value and one for the inserted value.
+                    SplitResult { common_prefix, left_rest: insert_key_rest, right_rest: self_key_rest } => {
+                        let common_prefix = common_prefix.into();
+                        let insert_key_rest = insert_key_rest.into();
+                        *self_key = self_key_rest.into();
+                        let insert_new_leaf = Node::Leaf { key_rest: insert_key_rest, value: insert_value };
+                        self.splice_interior(common_prefix, [insert_new_leaf]);
+                        InsertResult::Ok
                     }
                 }
             }
-        }
-        insert::<true, T>(self, insert_key, insert_value)
+            Node::Interior { key_prefix: self_key, children } => {
+                // call insert with IS_ROOT=false on the children, then check for NoPrefix
+                match split_prefix_rest(insert_key, self_key, str::char_indices) {
+                    
+                    // The insertion key is equal to the current node's key. However, so far it was
+                    // an interior node, i.e., it had no value. So we must insert a new leaf node.
+                    SplitResult { common_prefix: _, left_rest: "", right_rest: "" } => {
+                        // FIXME: What if there is a leaf node with an empty key as a child already?
+                        // TODO: I think this case should be folded into the the other, more generic ones.
+                        let insert_new_leaf = Node::Leaf { key_rest: "".into(), value: insert_value };
+                        children.push(insert_new_leaf);
+                        InsertResult::Ok
+                    }
+
+                    // The insertion key was a true prefix of the current node's key, so we must split the current node.
+                    SplitResult { common_prefix, left_rest: "", right_rest: self_key_rest } => {
+                        let common_prefix = common_prefix.into();
+                        *self_key = self_key_rest.into();
+                        let insert_new_leaf = Node::Leaf { key_rest: "".into(), value: insert_value };
+                        self.splice_interior(common_prefix, [insert_new_leaf]);
+                        InsertResult::Ok
+                    }
+
+                    // SplitResult { common_prefix, left_rest: insert_key_rest, right_rest: "" } => {
+                    //     let mut insert_value = insert_value;
+                    //     for child in children.iter_mut() {
+                    //         match child.insert::<false>(insert_key_rest, insert_value) {
+                    //             // Not successful, so try the next child.
+                    //             InsertResult::NoPrefix { value } => insert_value = value,
+                    //             // Successful (either replaced or inserted a new leaf node), so return.
+                    //             insert_result => return insert_result
+                    //         }
+                    //     }
+                    // }
+
+
+
+                    // // FIXME: Is this correct wrt. the invariant that interior nodes must not have an empty key?
+                    // // The current node "consumed" a prefix of the queried key, so search further in the children.
+                    // SplitResult { common_prefix: _, left_rest: WRONG, right_rest: "" } => {
+                    //     let mut insert_value = insert_value;
+                    //     for child in children.iter_mut() {
+                    //         match child.insert::<false>(insert_key_rest, insert_value) {
+                    //             // Not successful, so try the next child.
+                    //             InsertResult::NoPrefix { value } => insert_value = value,
+                    //             // Successful (either replaced or inserted a new leaf node), so return.
+                    //             insert_result => return insert_result
+                    //         }
+                    //     }
+
+                    //     // No child could be found that could consume the rest of the insertion key,
+                    //     // so we must insert a new leaf node.
+                    //     let insert_new_leaf = Node::Leaf { key_rest: "".into(), value: insert_value };
+                    //     children.push(insert_new_leaf);
+                    //     InsertResult::Ok
+                    // }
+
+
+                    
+                    // // The insertion key and the current node's key don't have a common prefix.
+                    // SplitResult { common_prefix: "", left_rest: self_key_rest, right_rest: insert_key_rest } if !IS_ROOT => {
+                    //     InsertResult::NoPrefix { value: insert_value }
+                    // }
+
+
+                    _ => todo!()
+                }
+            }
+    }
     }
 
     pub fn remove_exact(&mut self, remove_key: &str) -> Option<T> {
@@ -990,7 +1057,7 @@ mod test {
     #[test]
     fn test_insert_into_empty_leaf() {
         let mut root = Node::from_test_string(r#""":1"#);
-        assert_matches!(root.insert("foo", 2), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("foo", 2), InsertResult::Ok);
         assert_eq!(root, Node::from_test_string(r#"""
   "":1
   "foo":2"#));
@@ -999,7 +1066,7 @@ mod test {
     #[test]
     fn test_insert_empty_key() {
         let mut root = Node::from_test_string(r#""foo":1"#);
-        assert_matches!(root.insert("", 2), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("", 2), InsertResult::Ok);
         assert_eq!(root, Node::from_test_string(r#"""
   "foo":1
   "":2"#));
@@ -1008,27 +1075,27 @@ mod test {
     #[test]
     fn test_insert_duplicate() {
         let mut root = Node::from_test_string(r#""foo":1"#);
-        assert_matches!(root.insert("foo", 2), InsertResult::Replaced { old_value: 1 });
+        assert_matches!(root.insert::<true>("foo", 2), InsertResult::Replaced { old_value: 1 });
         assert_eq!(root, Node::from_test_string(r#""foo":2"#));
     }
 
     #[test]
     fn test_insert_split_leaf() {
         let mut root = Node::from_test_string(r#""foo":1"#);
-        assert_matches!(root.insert("foobar", 2), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("foobar", 2), InsertResult::Ok);
         assert_eq!(root, Node::from_test_string(r#""foo"
   "":1
   "bar":2"#));
 
         let mut root = Node::from_test_string(r#""foobar":1"#);
-        assert_matches!(root.insert("foo", 2), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("foo", 2), InsertResult::Ok);
         assert_eq!(root, Node::from_test_string(r#""foo"
   "bar":1
   "":2"#));
 
         // TODO: Or should this fail?
         let mut root = Node::from_test_string(r#""foo":1"#);
-        assert_matches!(root.insert("bar", 2), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("bar", 2), InsertResult::Ok);
         assert_eq!(root, Node::from_test_string(r#"""
   "foo":1
   "bar":2"#));
@@ -1039,7 +1106,7 @@ mod test {
         let mut root = Node::from_test_string(r#""foo"
   "bar":1
   "qux":2"#);
-        assert_matches!(root.insert("foozaz", 3), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("foozaz", 3), InsertResult::Ok);
         assert_eq!(root, Node::from_test_string(r#""foo"
   "bar":1
   "qux":2

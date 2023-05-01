@@ -25,12 +25,21 @@ where
 {
     pub fn new(key_split_points: F) -> Self {
         Self {
-            root: Node::Interior {
-                key_prefix: "".into(),
-                children: Vec::new(),
-            },
+            root: Node::new_root(),
             key_split_points,
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.root.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.root.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.root = Node::new_root();
     }
 
 //     pub fn by_levels(&self) -> Vec<(&str, usize)> {
@@ -56,6 +65,7 @@ where
 //     //     todo!()
 //     // }
 }
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Node<T> {
@@ -257,12 +267,28 @@ const TEST_INDENT: &str = "  ";
 const TEST_DELIM: &str = ":";
 
 impl<T> Node<T> {
+
+    // Constructors:
+
     pub fn new_leaf(str: &str, value: T) -> Self {
         Node::Leaf {
             key_rest: str.into(),
             value,
         }
     }
+
+    pub fn new_root() -> Self {
+        Node::Interior {
+            key_prefix: "".into(),
+            children: vec![],
+        }
+    }
+
+    // No constructor for interior nodes, because they are only created when splitting nodes.
+    // Check `split_node` for details.
+
+
+    // Accessors:
 
     pub fn key_part(&self) -> &str {
         match self {
@@ -271,19 +297,42 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn children(&self) -> impl Iterator<Item=&Node<T>> {
+    pub fn children(&self) -> std::slice::Iter<Node<T>> {
         match self {
             Node::Leaf { .. } => [].iter(),
             Node::Interior { children, .. } => children.iter(),
         }
     }
 
-    pub fn children_mut(&mut self) -> impl Iterator<Item=&mut Node<T>> {
+    pub fn children_mut(&mut self) -> std::slice::IterMut<Node<T>> {
         match self {
             Node::Leaf { .. } => [].iter_mut(),
             Node::Interior { children, .. } => children.iter_mut(),
         }
     }
+
+
+    // Other common functions for data structures:
+    
+    /// Returns the number of mappings (i.e., leafs) in the trie.
+    pub fn len(&self) -> usize {
+        match self {
+            Node::Leaf { .. } => 1,
+            Node::Interior { children, .. } => children.iter().map(Self::len).sum(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        // This is faster then checking `self.len() == 0`, because it does not need to traverse the
+        // whole trie.
+        match self {
+            Node::Leaf { .. } => false,
+            Node::Interior { children, .. } => children.is_empty(),
+        }
+    }
+
+
+    // Iterators:
 
     /// Generic interior pre-order depth-first traversal of the trie, configurable by `K` and `V`.
     fn internal_iter_generic<'trie, K, V, F>(&'trie self, key_parts_stack: &mut K, f: &mut F)
@@ -346,6 +395,9 @@ impl<T> Node<T> {
     pub fn external_iter_values(&self) -> Iter<T, /* no key_parts_stack */ (), &T> {
         Iter::new(self)
     }
+
+
+    // Utility functions for testing:
 
     #[cfg(test)]
     fn to_test_string(&self) -> String
@@ -439,30 +491,6 @@ impl<T> Node<T> {
         assert_eq!(subtries.len(), 1, "more than one root node");
         subtries.pop().unwrap().1
     }
-
-//     // TODO make lazy iterator, not collecting into result
-//     fn by_levels<'a>(&'a self, level: usize, result: &mut Vec<(&'a str, usize)>) {
-//         result.push((&self.common_prefix, level));
-//         for child in &self.children {
-//             child.by_levels(level+1, result);
-//         }
-//     }
-
-//     // TODO iterator, rename to iter_with_count()
-//     fn by_levels_with_count<'a>(&'a self, level: usize, result: &mut Vec<(&'a str, usize, usize)>) {
-//         result.push((&self.common_prefix, level, self.len()));
-//         for child in &self.children {
-//             child.by_levels_with_count(level+1, result);
-//         }
-//     }
-
-//     fn len(&self) -> usize {
-//         if self.is_leaf() {
-//             1
-//         } else {
-//             self.children.iter().map(|node| node.len()).sum()
-//         }
-//     }
 
 //     fn sort_by_count(&mut self) {
 //         self.children.sort_by_cached_key(|node| std::cmp::Reverse(node.len()));

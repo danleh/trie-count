@@ -866,7 +866,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::{assert_matches::assert_matches, cmp::Reverse, collections::HashMap};
+    use std::{assert_matches::assert_matches, cmp::Reverse, collections::HashMap, ops::RangeInclusive};
 
 
     use super::*;
@@ -1077,36 +1077,36 @@ mod test {
   "qux":2"#));
     }
 
-    #[test]
-    fn test_insert_random_strings() {
+    fn random_values(count: usize, max_string_len: usize, charset: RangeInclusive<char>) -> impl Iterator<Item=(String, usize)> {
         use rand::{Rng, distributions::Uniform, prelude::Distribution};
-
-        let mut root = Node::new_root();
-        
-        const STRING_COUNT: usize = 10;
-        const MAX_STRING_LENGTH: usize = 4;
-        let char_distribution = Uniform::new_inclusive('A', 'C');
+        let char_distribution = Uniform::from(charset);
 
         let mut rng = rand::thread_rng();
-        let mut insertions = HashMap::new();
-        for i in 0..=STRING_COUNT {
-            println!("{}", root.to_test_string());
-            if i == STRING_COUNT {
-                break;
-            }
 
-            let str_len = rng.gen_range(0..=MAX_STRING_LENGTH);
+        (0..count).map(move |i| {
+            let str_len = rng.gen_range(0..=max_string_len);
             let str: String = char_distribution
                 .sample_iter(&mut rng)
                 .take(str_len)
                 .collect();
-            let value: usize = i;
-            print!("insert {str:?}:{value}");
+            let value = i;
+            (str, value)
+        })
+    }
 
+    #[test]
+    fn test_insert_random_strings() {
+        let mut root = Node::new_root();
+        let mut hashmap_reference = HashMap::new();
+
+        for (str, value) in random_values(20, 5, 'A'..='C') {
+            println!("{}", root.to_test_string());
+
+            print!("insert {str:?}:{value}");
             let result = root.insert::<true>(&str, value);
             println!(" ... {result:?}");
 
-            let result_reference = insertions.insert(str, value);
+            let result_reference = hashmap_reference.insert(str, value);
             match (&result, result_reference) {
                 (InsertResult::Ok, None) => {},
                 (InsertResult::Replaced { old_value }, Some(old_value_reference)) if *old_value == old_value_reference => {},
@@ -1114,10 +1114,11 @@ mod test {
             }
 
             root.assert_invariants::<true>();
-            assert_eq!(root.len(), insertions.len());
+            assert_eq!(root.len(), hashmap_reference.len());
         }
+        println!("{}", root.to_test_string());
         
-        let mut insertions_sorted: Vec<(String, usize)> = insertions.into_iter().collect();
+        let mut insertions_sorted: Vec<(String, usize)> = hashmap_reference.into_iter().collect();
         insertions_sorted.sort();
 
         let mut trie_items_sorted = Vec::new();
@@ -1153,6 +1154,29 @@ mod test {
         assert_eq!(root, Node::from_test_string(r#""foo"
   "":2
   "bar":1"#));
+    }
+
+    #[test]
+    fn test_sort_by_key_random() {
+        let mut root = Node::new_root();
+        let mut hashmap_reference = HashMap::new();
+        for (str, value) in random_values(20, 5, 'A'..='C') {
+            root.insert::<true>(&str, value);
+            hashmap_reference.insert(str, value);
+        }
+        
+        let mut insertions_sorted: Vec<(String, usize)> = hashmap_reference.into_iter().collect();
+        insertions_sorted.sort();
+
+        root.sort_by_key();
+                
+        let mut trie_iterator_items = Vec::new();
+        let mut trie_iter = root.external_iter_items_leafs();
+        while let Some((str, value)) = trie_iter.next() {
+            trie_iterator_items.push((str.join(""), *value));
+        }
+
+        assert_eq!(trie_iterator_items, insertions_sorted);
     }
 
     #[test]

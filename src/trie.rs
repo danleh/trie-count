@@ -7,7 +7,7 @@ use std::{str::FromStr, marker::PhantomData, iter::Sum};
 
 use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 
-// TODO generalize over generic sequences of K (e.g., bytes) instead of just `&str`.
+// TODO: generalize over generic sequences of K (e.g., bytes) instead of just `&str`.
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Trie<T, F> {
@@ -587,24 +587,25 @@ impl<T> Node<T> {
     // Inserts a fresh interior node of which the old `self` will become a child. That is, go from:
     //  self
     // to:
-    //  Node::Interior { interior_key, children: [self, other_children...] }
-    fn splice_interior<const N: usize>(&mut self, interior_key: Box<str>, other_children: [Node<T>; N]) {
+    //  Node::Interior { interior_key, children: [self, other_child] }
+    // TODO: Maybe insert this into the `insert` method code.
+    fn splice_interior(&mut self, interior_key: Box<str>, other_child: Node<T>) {
         let new_interior = Node::Interior {
             key_prefix: interior_key,
-            children: Vec::with_capacity(N+1),
+            children: Vec::with_capacity(2),
         };
         let old_self = std::mem::replace(self, new_interior);
         match self /* == new_interior */ {
             Node::Interior { children, .. } => {
                 children.push(old_self);
-                children.extend(other_children.into_iter());
+                children.push(other_child);
             }
             _ => unreachable!("we just replaced self with a new interior node")
         }
     }
 
-    // TODO: Factor out the common two last cases from leafs and interior nodes, in which we neither
-    // access `Leaf::value` nor `Interior::children`.
+    // TODO: Factor out the common two last cases from leafs and interior nodes, in which we 
+    // neither access `Leaf::value` nor `Interior::children`, hence the same code.
     pub fn insert<const IS_ROOT: bool>(&mut self, insert_key: &str, insert_value: T) -> InsertResult<T> {
         match self {
             Node::Leaf { key_rest: self_key, value } => {
@@ -632,7 +633,7 @@ impl<T> Node<T> {
                         let common_prefix = common_prefix.into();
                         let new_leaf = Node::new_leaf(insert_key_rest, insert_value);
                         *self_key = self_key_rest.into();
-                        self.splice_interior(common_prefix, [new_leaf]);
+                        self.splice_interior(common_prefix, new_leaf);
                         InsertResult::Ok
                     }
                 }
@@ -682,7 +683,7 @@ impl<T> Node<T> {
                         let common_prefix = common_prefix.into();
                         let new_leaf = Node::new_leaf(insert_key_rest, insert_value);
                         *self_key = self_key_rest.into();
-                        self.splice_interior(common_prefix, [new_leaf]);
+                        self.splice_interior(common_prefix, new_leaf);
                         InsertResult::Ok
                     }
                 }

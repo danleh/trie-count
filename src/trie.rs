@@ -603,6 +603,8 @@ impl<T> Node<T> {
         }
     }
 
+    // TODO: Factor out the common two last cases from leafs and interior nodes, in which we neither
+    // access `Leaf::value` nor `Interior::children`.
     pub fn insert<const IS_ROOT: bool>(&mut self, insert_key: &str, insert_value: T) -> InsertResult<T> {
         match self {
             Node::Leaf { key_rest: self_key, value } => {
@@ -688,8 +690,13 @@ impl<T> Node<T> {
     }
     }
 
-    pub fn remove_exact(&mut self, remove_key: &str) -> Option<T> {
-        // TODO: Based on code for `get_exact`. Maybe refactor into a common function that returns a `&mut Node<T>`?
+    pub fn insert_or_update(&mut self, key: &str, insert_value: T, update: impl FnOnce(&mut T)) -> InsertResult<T> {
+        // TODO: Based on `insert`.
+        todo!()
+    }
+
+    pub fn remove_exact(&mut self, key: &str) -> Option<T> {
+        // TODO: Based on `get_exact`. Maybe refactor into a common function that returns a `&mut Node<T>`?
         todo!()
     }
 

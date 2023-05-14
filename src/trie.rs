@@ -76,15 +76,9 @@ where
 
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Node<T> {
-    Leaf { 
-        key_rest: Box<str>,
-        value: T,
-    },
-    Interior {
-        key_prefix: Box<str>,
-        children: Vec<Node<T>>,
-    },
+pub struct Node<T> {
+    key_part: Box<str>,
+    data: NodeData<T>,
 
     // TODO: Potential extensions, optimizations.
     // parent: &Node,
@@ -92,6 +86,12 @@ pub enum Node<T> {
     // subtree_size: usize,
 
     // TODO: Alternative design: allow interior nodes to have values.
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum NodeData<T> {
+    Leaf(T),
+    Interior(Vec<Node<T>>),
 }
 
 // The `KeyStack` trait is essentially a lending iterator, because it returns a key representation
@@ -279,16 +279,16 @@ impl<T> Node<T> {
     // Constructors:
 
     pub fn new_leaf(str: &str, value: T) -> Self {
-        Node::Leaf {
-            key_rest: str.into(),
-            value,
+        Node {
+            key_part: str.into(),
+            data: NodeData::Leaf(value),
         }
     }
 
     pub fn new_root() -> Self {
-        Node::Interior {
-            key_prefix: "".into(),
-            children: vec![],
+        Node {
+            key_part: "".into(),
+            data: NodeData::Interior(vec![]),
         }
     }
 
@@ -298,24 +298,17 @@ impl<T> Node<T> {
 
     // Accessors:
 
-    pub fn key_part(&self) -> &str {
-        match self {
-            Node::Leaf { key_rest, .. } => key_rest,
-            Node::Interior { key_prefix, .. } => key_prefix,
-        }
-    }
-
     pub fn children(&self) -> std::slice::Iter<Node<T>> {
-        match self {
-            Node::Leaf { .. } => [].iter(),
-            Node::Interior { children, .. } => children.iter(),
+        match &self.data {
+            NodeData::Leaf(_) => [].iter(),
+            NodeData::Interior(children) => children.iter(),
         }
     }
 
     pub fn children_mut(&mut self) -> std::slice::IterMut<Node<T>> {
-        match self {
-            Node::Leaf { .. } => [].iter_mut(),
-            Node::Interior { children, .. } => children.iter_mut(),
+        match &mut self.data {
+            NodeData::Leaf(_) => [].iter_mut(),
+            NodeData::Interior(children) => children.iter_mut(),
         }
     }
 
@@ -324,9 +317,9 @@ impl<T> Node<T> {
     
     /// Returns the number of mappings (i.e., leafs) in the trie.
     pub fn len(&self) -> usize {
-        match self {
-            Node::Leaf { .. } => 1,
-            Node::Interior { children, .. } => children.iter().map(Self::len).sum(),
+        match &self.data {
+            NodeData::Leaf(_) => 1,
+            NodeData::Interior { children, .. } => children.iter().map(Self::len).sum(),
         }
     }
 

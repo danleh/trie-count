@@ -241,12 +241,12 @@ fn test_trie() -> Node<u32> {
             Node::Interior { 
                 key_prefix: "bar".into(), 
                 children: vec![
-                    Node::Leaf { key_rest: "".into(), value: 0 },
-                    Node::Leaf { key_rest: "qux".into(), value: 1 },
+                    Node::new_leaf("", 0),
+                    Node::new_leaf("qux", 1),
                 ],
             },
-            Node::Leaf { key_rest: "qux".into(), value: 2 },
-            Node::Leaf { key_rest: "".into(), value: 3 },
+            Node::new_leaf("qux", 2),
+            Node::new_leaf("", 3),
         ],
     }
 }
@@ -278,7 +278,6 @@ impl<T> Node<T> {
 
     // Constructors:
 
-    // TODO: Replace all `Node::Leaf { .. }` with `Node::new_leaf(..)`.
     pub fn new_leaf(str: &str, value: T) -> Self {
         Node::Leaf {
             key_rest: str.into(),
@@ -476,7 +475,7 @@ impl<T> Node<T> {
 
             match maybe_value {
                 Some(value) => {
-                    subtries.push((level, Node::Leaf { key_rest: key_part.into(), value }));
+                    subtries.push((level, Node::new_leaf(key_part, value)));
                 },
                 None => {
                     let mut children = Vec::new();
@@ -643,7 +642,7 @@ impl<T> Node<T> {
                     SplitResult { common_prefix: "", left_rest: insert_key, right_rest: "" } if children.is_empty() => {
                         assert!(IS_ROOT);
                         // Replace the "empty" root with a leaf node.
-                        *self = Node::Leaf { key_rest: insert_key.into(), value: insert_value };
+                        *self = Node::new_leaf(insert_key, insert_value);
                         InsertResult::Ok
                     }
 
@@ -964,15 +963,8 @@ mod test {
     fn test_get_all_with_prefix() {
         let root = test_trie();
 
-        assert_eq!(root.get_all_with_prefix("fooqux"), Some(("foo", (&Node::Leaf {
-            key_rest: "qux".into(),
-            value: 2,
-        }))));
-
-        assert_eq!(root.get_all_with_prefix("foobarqux"), Some(("foobar", (&Node::Leaf {
-            key_rest: "qux".into(),
-            value: 1,
-        }))));
+        assert_eq!(root.get_all_with_prefix("fooqux"), Some(("foo", (&Node::new_leaf("qux", 2)))));
+        assert_eq!(root.get_all_with_prefix("foobarqux"), Some(("foobar", (&Node::new_leaf("qux", 1)))));
         
         assert_eq!(root.get_all_with_prefix("xyz"), None);
         

@@ -409,7 +409,7 @@ impl<T> Node<T> {
 
     #[cfg(test)]
     fn to_test_string(&self) -> String
-        where T: std::fmt::Display
+        where T: std::fmt::Debug
     {
         use std::fmt::Write;
         let mut str_acc = String::new();
@@ -421,7 +421,7 @@ impl<T> Node<T> {
             }
             write!(str_acc, "{:?}", key_parts.last().unwrap()).unwrap();
             if let Some(value) = maybe_value { // Leaf.
-                write!(str_acc, "{TEST_DELIM}{value}").unwrap();
+                write!(str_acc, "{TEST_DELIM}{value:?}").unwrap();
             }
             str_acc.push('\n');
         }
@@ -1168,7 +1168,9 @@ mod test {
         let mut insertions_sorted: Vec<(String, usize)> = hashmap_reference.into_iter().collect();
         insertions_sorted.sort();
 
+        println!("before sort: {}", root.to_test_string());
         root.sort_by_key();
+        println!("after sort: {}", root.to_test_string());
                 
         let mut trie_iterator_items = Vec::new();
         let mut trie_iter = root.external_iter_items_leafs();
@@ -1198,6 +1200,30 @@ mod test {
   "bar"
     "zaz":3
     "":4"#));
+    }
+
+    #[test]
+    fn test_directory_tree() {
+        let mut root: Node<()> = Node::new_root();
+
+        for entry in walkdir::WalkDir::new(".") {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            let str = path.to_string_lossy();
+            if str.contains(".git") || str.contains("target") {
+                continue;
+            }
+            root.insert::<true>(&str, ());
+        }
+
+        root.sort_by_key();
+        println!("sorted trie:{}", root.to_test_string());
+
+        println!("entries:");
+        let mut trie_iter = root.external_iter_items_leafs();
+        while let Some((str, _)) = trie_iter.next() {
+            println!("  {}", str.join(""));
+        }
     }
 
     // TODO: unicode tests: smileys, German umlauts, etc.

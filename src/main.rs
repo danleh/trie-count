@@ -2,7 +2,7 @@
 #![feature(new_uninit)]
 #![feature(generators, generator_trait)]
 
-#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
+// #![allow(dead_code, unused_imports, unused_variables, unused_mut)]
 
 // use mimalloc::MiMalloc;
 

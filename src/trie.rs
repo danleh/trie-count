@@ -409,12 +409,11 @@ impl<T> Node<T> {
                 InsertResult::Replaced { old_value }
             }
 
-            // This is an interior node with an empty key part, which is only allowed for the 
-            // (initial) "empty" root node (in which case it must also not have any children).
-            // -> Replace this root node with a single new leaf.
-            (NodeData::Interior(children), SplitResult { common_prefix: "", left_rest: insert_key, right_rest: "" }) => {
-                debug_assert!(IS_ROOT);
-                debug_assert!(children.is_empty());
+            // This is the "initial" empty root (an interior node with an empty key and no children).
+            // -> Replace with a single new leaf.
+            (NodeData::Interior(children), SplitResult { common_prefix, left_rest: insert_key, right_rest }) if IS_ROOT && children.is_empty() => {
+                debug_assert!(common_prefix.is_empty());
+                debug_assert!(right_rest.is_empty());
 
                 *self = Node::leaf(insert_key, insert_value);
                 InsertResult::Ok
@@ -692,7 +691,9 @@ impl<T> Node<T> {
     where T: std::fmt::Debug
     {
         if let NodeData::Interior(children) = &self.data {
-            if !IS_ROOT {
+            if IS_ROOT {
+                assert!(children.is_empty() || children.len() > 1, "invariant violated: the root node must have either no child (initial empty root), or at least two children\n{self:?}");
+            } else {
                 assert!(!self.key_part.is_empty(), "invariant violated: interior nodes (except the root node) must have a non-empty key part\n{self:?}");
                 assert!(children.len() > 1, "invariant violated: interior nodes (except the empty root node) must have at least two children\n{self:?}");
             }

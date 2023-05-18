@@ -241,9 +241,6 @@ impl<T> Node<T> {
         Self::interior("", Vec::new())
     }
 
-    // No constructor for interior nodes, because they are only created when splitting nodes.
-    // Check `splice_interior` for details.
-
 
     // Accessors:
 
@@ -272,7 +269,7 @@ impl<T> Node<T> {
     // Other common functions for data structures:
     
     /// Returns the number of mappings (i.e., leafs) in the trie.
-    /// Requires O(n) time, where n is the number of nodes in the trie.
+    /// O(n), where n is the number of nodes in the trie.
     pub fn len(&self) -> usize {
         match &self.data {
             NodeData::Leaf(_) => 1,
@@ -281,7 +278,7 @@ impl<T> Node<T> {
     }
 
     /// Returns `true` if the trie contains no mappings (i.e., leafs).
-    /// Requires O(1) time.
+    /// O(1).
     pub fn is_empty(&self) -> bool {
         // This is faster then checking `self.len() == 0`, because it does not need to traverse the
         // whole trie to calculate the length first.
@@ -348,14 +345,6 @@ impl<T> Node<T> {
     }
 
 
-//     fn sort_by_count(&mut self) {
-//         self.children.sort_by_cached_key(|node| std::cmp::Reverse(node.len()));
-//         for child in &mut self.children {
-//             child.sort_by_count();
-//         }
-//     }
-
-
     // Finding, inserting, and removing key value mappings:
 
     /// Returns `Some(T)` if there is a value associated with the exact given key, 
@@ -383,11 +372,11 @@ impl<T> Node<T> {
     /// Also returns the key.
     pub fn get_first_with_prefix<'trie>(&'trie self, key_query: &'_ str) -> Option<(/* key */ String, &'trie T)> {
         if let Some((key_matched, subtrie)) = self.get_all_with_prefix(key_query) {
-            if let Some((key_parts, value)) = subtrie.external_iter_items_leafs().next() {
+            if let Some((subtrie_key_parts, value)) = subtrie.external_iter_items_leafs().next() {
                 // I would hope that the string allocation and concetenation is optimized away
                 // if the caller does not use the key, but I am not sure.
                 let mut key = key_matched.to_owned();
-                for part in key_parts {
+                for part in subtrie_key_parts {
                     key.push_str(part);
                 }
                 return Some((key, value));
@@ -559,6 +548,13 @@ impl<T> Node<T> {
             children.sort_by(|a, b| a.key_part.cmp(&b.key_part));
         }
     }
+
+//     fn sort_by_count(&mut self) {
+//         self.children.sort_by_cached_key(|node| std::cmp::Reverse(node.len()));
+//         for child in &mut self.children {
+//             child.sort_by_count();
+//         }
+//     }
 
     /// Sorts the trie by the result of the given function applied to each node.
     pub fn sort_by_func<F, O>(&mut self, mut f: F)

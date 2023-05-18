@@ -25,7 +25,7 @@ where
 {
     pub fn new(key_split_points: F) -> Self {
         Self {
-            root: Node::new_root(),
+            root: Node::empty_root(),
             key_split_points,
         }
     }
@@ -39,7 +39,7 @@ where
     }
 
     pub fn clear(&mut self) {
-        self.root = Node::new_root();
+        self.root = Node::empty_root();
     }
 
     pub fn insert(&mut self, key: &str, value: T) -> Option<T> {
@@ -81,7 +81,8 @@ pub struct Node<T> {
     data: NodeData<T>,
 
     // TODO: Potential extensions, optimizations.
-    // parent: &Node,
+    // parent: Option<&Node<T>>,
+
     // Cache of the subtree values.
     // subtree_size: usize,
 
@@ -150,24 +151,22 @@ impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
 }
 
 /// Trait for abstracting over values, either both leafs and interior nodes, or only leafs.
-pub trait Value<'trie, T> {
-    const WITH_INTERIOR: bool;
-    fn leaf(value: &'trie T) -> Self;
-    fn interior() -> Self;
+pub trait Value<'trie, T> : Sized {
+    fn from(node: &'trie Node<T>) -> Option<Self>;
 }
 
 /// Implementation for only iterating over leaf nodes (which always have a value).
 impl<'trie, T> Value<'trie, T> for &'trie T {
-    const WITH_INTERIOR: bool = false;
-    fn leaf(value: &'trie T) -> Self { value }
-    fn interior() -> Self { unreachable!() }
+    fn from(node: &'trie Node<T>) -> Option<Self> {
+        node.value()
+    }
 }
 
 /// Implementation for iterating over all nodes, including interior nodes (which are `None`).
 impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
-    const WITH_INTERIOR: bool = true;
-    fn leaf(value: &'trie T) -> Self { Some(value) }
-    fn interior() -> Self { None }
+    fn from(node: &'trie Node<T>) -> Option<Self> {
+        Some(node.value())
+    }
 }
 
 
@@ -203,20 +202,14 @@ where
     pub fn next<'next>(&'next mut self) -> Option<(<K as KeyWithLifetime<'next>>::Key, V)> {
         while let Some(cur_node) = self.node_stack.pop() {
             match cur_node {
-                Some(Node::Leaf { key_rest, value }) => {
-                    self.node_stack.push(None);
-                    self.key_parts_stack.push(key_rest);
-
-                    return Some((self.key_parts_stack.get_current(), V::leaf(value)));
-                }
-                Some(Node::Interior { key_prefix, children }) => {
+                Some(node) => {
+                    self.key_parts_stack.push(&node.key_part);
+                    // Pop from the key parts stack again after having processed this subtrie.
                     self.node_stack.push(None);
                     // Process the children next, i.e., depth-first traversal.
-                    self.node_stack.extend(children.iter().rev().map(Some));
-                    self.key_parts_stack.push(key_prefix);
-
-                    if V::WITH_INTERIOR {
-                        return Some((self.key_parts_stack.get_current(), V::interior()));
+                    self.node_stack.extend(node.children().rev().map(Some));
+                    if let Some(value) = V::from(node) {
+                        return Some((self.key_parts_stack.get_current(), value));
                     }
                 }
                 None => self.key_parts_stack.pop(),
@@ -235,20 +228,14 @@ where
 /// └── "" -> 3
 #[cfg(test)]
 fn test_trie() -> Node<u32> {
-    Node::Interior { 
-        key_prefix: "foo".into(), 
-        children: vec![
-            Node::Interior { 
-                key_prefix: "bar".into(), 
-                children: vec![
-                    Node::new_leaf("", 0),
-                    Node::new_leaf("qux", 1),
-                ],
-            },
-            Node::new_leaf("qux", 2),
-            Node::new_leaf("", 3),
-        ],
-    }
+    Node::interior("foo", vec![
+        Node::interior("bar", vec![
+            Node::leaf("", 0),
+            Node::leaf("qux", 1),
+        ]),
+        Node::leaf("qux", 2),
+        Node::leaf("", 3),
+    ])
 }
 
 #[test]
@@ -278,18 +265,22 @@ impl<T> Node<T> {
 
     // Constructors:
 
-    pub fn new_leaf(str: &str, value: T) -> Self {
+    fn leaf(str: &str, value: T) -> Self {
         Node {
             key_part: str.into(),
             data: NodeData::Leaf(value),
         }
     }
 
-    pub fn new_root() -> Self {
+    fn interior(str: &str, children: Vec<Node<T>>) -> Self {
         Node {
-            key_part: "".into(),
-            data: NodeData::Interior(vec![]),
+            key_part: str.into(),
+            data: NodeData::Interior(children),
         }
+    }
+
+    fn empty_root() -> Self {
+        Self::interior("", Vec::new())
     }
 
     // No constructor for interior nodes, because they are only created when splitting nodes.
@@ -297,6 +288,13 @@ impl<T> Node<T> {
 
 
     // Accessors:
+
+    pub fn value(&self) -> Option<&T> {
+        match &self.data {
+            NodeData::Leaf(value) => Some(value),
+            NodeData::Interior(_) => None,
+        }
+    }
 
     pub fn children(&self) -> std::slice::Iter<Node<T>> {
         match &self.data {
@@ -316,19 +314,22 @@ impl<T> Node<T> {
     // Other common functions for data structures:
     
     /// Returns the number of mappings (i.e., leafs) in the trie.
+    /// Requires O(n) time, where n is the number of nodes in the trie.
     pub fn len(&self) -> usize {
         match &self.data {
             NodeData::Leaf(_) => 1,
-            NodeData::Interior { children, .. } => children.iter().map(Self::len).sum(),
+            NodeData::Interior(children) => children.iter().map(Self::len).sum(),
         }
     }
 
+    /// Returns `true` if the trie contains no mappings (i.e., leafs).
+    /// Requires O(1) time.
     pub fn is_empty(&self) -> bool {
         // This is faster then checking `self.len() == 0`, because it does not need to traverse the
-        // whole trie.
-        match self {
-            Node::Leaf { .. } => false,
-            Node::Interior { children, .. } => children.is_empty(),
+        // whole trie to calculate the length first.
+        match &self.data {
+            NodeData::Leaf(_) => false,
+            NodeData::Interior(children) => children.is_empty(),
         }
     }
 
@@ -342,23 +343,14 @@ impl<T> Node<T> {
         V: Value<'trie, T>,
         F: for<'any> FnMut(<K as KeyWithLifetime<'any>>::Key, V)
     {
-        match self {
-            Node::Leaf { key_rest, value } => {
-                key_parts_stack.push(key_rest);
-                f(key_parts_stack.get_current(), V::leaf(value));
-                key_parts_stack.pop();
-            }
-            Node::Interior { key_prefix, children } => {
-                key_parts_stack.push(key_prefix);
-                if V::WITH_INTERIOR {
-                    f(key_parts_stack.get_current(), V::interior());
-                }
-                for child in children {
-                    child.internal_iter_generic(key_parts_stack, f);
-                }
-                key_parts_stack.pop();
-            }
+        key_parts_stack.push(&self.key_part);
+        if let Some(value) = V::from(self) {
+            f(key_parts_stack.get_current(), value);
         }
+        for child in self.children() {
+            child.internal_iter_generic(key_parts_stack, f);
+        }
+        key_parts_stack.pop();
     }
 
     /// Depth-first traversal of the trie, including interior nodes, and with key parts.
@@ -468,7 +460,7 @@ impl<T> Node<T> {
 
             match maybe_value {
                 Some(value) => {
-                    subtries.push((level, Node::new_leaf(key_part, value)));
+                    subtries.push((level, Node::leaf(key_part, value)));
                 },
                 None => {
                     let mut children = Vec::new();
@@ -484,7 +476,7 @@ impl<T> Node<T> {
                             unreachable!();
                         }
                     }
-                    subtries.push((level, Node::Interior { key_prefix: key_part.into(), children })); 
+                    subtries.push((level, Node::interior(key_part, children))); 
                 },
             }
         }
@@ -506,13 +498,13 @@ impl<T> Node<T> {
     /// Returns `Some(T)` if there is a value associated with the exact given key, 
     /// or `None` if no such value exists.
     pub fn get_exact<'trie>(&'trie self, key_query: &'_ str) -> Option<&'trie T> {
-        match self {
-            Node::Leaf { key_rest, value } =>
-                if &key_rest[..] == key_query {
-                    return Some(value)
-                },
-            Node::Interior { key_prefix, children } => 
-                if let Some(key_query) = key_query.strip_prefix(&key_prefix[..]) {
+        match &self.data {
+            NodeData::Leaf(value) =>
+                if &self.key_part[..] == key_query {
+                    return Some(value);
+                }
+            NodeData::Interior(children) => 
+                if let Some(key_query) = key_query.strip_prefix(&self.key_part[..]) {
                     for child in children {
                         if let Some(value) = child.get_exact(key_query) {
                             return Some(value);
@@ -549,13 +541,13 @@ impl<T> Node<T> {
     -> Option<(/* key_matched */ &'query str, /* matching_subtrie */ &'trie Node<T>)> {
         fn get_all_with_prefix<'trie, T>(cur_node: &'trie Node<T>, key_query: &'_ str, key_matched_len: usize) 
         -> Option<(/* key_matched_len */ usize, /* matching_subtrie */ &'trie Node<T>)> {
-            match cur_node {
-                Node::Leaf { key_rest, value: _ } =>
-                    if key_rest.starts_with(key_query) {
+            match &cur_node.data {
+                NodeData::Leaf(_) =>
+                    if cur_node.key_part.starts_with(key_query) {
                         return Some((key_matched_len, cur_node))
                     },
-                Node::Interior { key_prefix: self_key, children } =>
-                    match split_prefix_rest(key_query, self_key, str::char_indices) {
+                NodeData::Interior(children) =>
+                    match split_prefix_rest(key_query, &cur_node.key_part, str::char_indices) {
                         // The queried key was fully a prefix of the current node, so return the whole subtrie.
                         SplitResult { common_prefix: _, left_rest: "", right_rest: _ } =>
                             return Some((key_matched_len, cur_node)),
@@ -581,15 +573,16 @@ impl<T> Node<T> {
     //  self
     // to:
     //  Node::Interior { interior_key, children: [self, other_child] }
-    // TODO: Maybe insert this into the `insert` method code.
+    // TODO: Maybe insert this into the `insert` method code, then fix the FIXME.
     fn splice_interior(&mut self, interior_key: Box<str>, other_child: Node<T>) {
-        let new_interior = Node::Interior {
-            key_prefix: interior_key,
-            children: Vec::with_capacity(2),
+        // FIXME: Replace with `Node::interior` once we don't need th Box<str> for avoiding cyclic borrowing.
+        let new_interior = Node {
+            key_part: interior_key,
+            data: NodeData::Interior(Vec::with_capacity(2)),
         };
         let old_self = std::mem::replace(self, new_interior);
-        match self /* == new_interior */ {
-            Node::Interior { children, .. } => {
+        match &mut self.data {
+            NodeData::Interior(children) => {
                 children.push(old_self);
                 children.push(other_child);
             }
@@ -597,12 +590,12 @@ impl<T> Node<T> {
         }
     }
 
-    // TODO: Factor out the common two last cases from leafs and interior nodes, in which we 
-    // neither access `Leaf::value` nor `Interior::children`, hence the same code.
     pub fn insert<const IS_ROOT: bool>(&mut self, insert_key: &str, insert_value: T) -> InsertResult<T> {
-        match self {
-            Node::Leaf { key_rest: self_key, value } => {
-                match split_prefix_rest(insert_key, self_key, str::char_indices) {
+        // TODO: Factor out the common two last cases from leafs and interior nodes, in which we 
+        // neither access `Leaf::value` nor `Interior::children`, hence the same code.
+        match &mut self.data {
+            NodeData::Leaf(value) => {
+                match split_prefix_rest(insert_key, &self.key_part, str::char_indices) {
                     // The insertion key is equal to the current node's key, so replace the value.
                     SplitResult { common_prefix: _, left_rest: "", right_rest: "" } => {
                         let old_value = std::mem::replace(value, insert_value);
@@ -623,22 +616,22 @@ impl<T> Node<T> {
                     // Split this node into an interior node with the common prefix as key,
                     // and two leaf nodes as children, one for self's old value and one for the inserted value.
                     SplitResult { common_prefix, left_rest: insert_key_rest, right_rest: self_key_rest } => {
-                        let common_prefix = common_prefix.into();
-                        let new_leaf = Node::new_leaf(insert_key_rest, insert_value);
-                        *self_key = self_key_rest.into();
+                        let common_prefix: Box<str> = common_prefix.into();
+                        let new_leaf = Node::leaf(insert_key_rest, insert_value);
+                        self.key_part = self_key_rest.into();
                         self.splice_interior(common_prefix, new_leaf);
                         InsertResult::Ok
                     }
                 }
             }
-            Node::Interior { key_prefix: self_key, children } => {
-                match split_prefix_rest(insert_key, self_key, str::char_indices) {
+            NodeData::Interior(children) => {
+                match split_prefix_rest(insert_key, &self.key_part, str::char_indices) {
                     // Interior node with empty key part and no children is only allowed for the 
                     // (initial) "empty" root node.
                     SplitResult { common_prefix: "", left_rest: insert_key, right_rest: "" } if children.is_empty() => {
                         assert!(IS_ROOT);
                         // Replace the "empty" root with a leaf node.
-                        *self = Node::new_leaf(insert_key, insert_value);
+                        *self = Node::leaf(insert_key, insert_value);
                         InsertResult::Ok
                     }
 
@@ -658,7 +651,7 @@ impl<T> Node<T> {
  
                         // No child could be found where the insert could take place,
                         // so we must create a new leaf node.
-                        let insert_new_leaf = Node::new_leaf(insert_key_rest, insert_value);
+                        let insert_new_leaf = Node::leaf(insert_key_rest, insert_value);
                         children.push(insert_new_leaf);
                         InsertResult::Ok
                     }
@@ -673,9 +666,9 @@ impl<T> Node<T> {
                     // The current node's key and the insertion key have a common prefix,
                     // so we must split the current node.
                     SplitResult { common_prefix, left_rest: insert_key_rest, right_rest: self_key_rest } => {
-                        let common_prefix = common_prefix.into();
-                        let new_leaf = Node::new_leaf(insert_key_rest, insert_value);
-                        *self_key = self_key_rest.into();
+                        let common_prefix: Box<str> = common_prefix.into();
+                        let new_leaf = Node::leaf(insert_key_rest, insert_value);
+                        self.key_part = self_key_rest.into();
                         self.splice_interior(common_prefix, new_leaf);
                         InsertResult::Ok
                     }
@@ -698,14 +691,14 @@ impl<T> Node<T> {
     fn assert_invariants<const IS_ROOT: bool>(&self)
     where T: std::fmt::Debug
     {
-        if let Node::Interior { key_prefix, children } = self {
+        if let NodeData::Interior(children) = &self.data {
             if !IS_ROOT {
-                assert!(!key_prefix.is_empty(), "invariant violated: interior nodes (except the root node) must have a non-empty key part\n{self:?}");
+                assert!(!self.key_part.is_empty(), "invariant violated: interior nodes (except the root node) must have a non-empty key part\n{self:?}");
                 assert!(children.len() > 1, "invariant violated: interior nodes (except the empty root node) must have at least two children\n{self:?}");
             }
             for (i, child1) in children.iter().enumerate() {
                 for child2 in &children[i+1..] {
-                    let split_result = split_prefix_rest(child1.key_part(), child2.key_part(), str::char_indices);
+                    let split_result = split_prefix_rest(&child1.key_part, &child2.key_part, str::char_indices);
                     assert!(split_result.common_prefix.is_empty(), "invariant violated: children of interior nodes must not have a common prefix\n{self:?}");
                 }
             }
@@ -717,11 +710,11 @@ impl<T> Node<T> {
 
     /// Sorts the children alphabetically by their key.
     pub fn sort_by_key(&mut self) {
-        if let Node::Interior { key_prefix: _, children } = self {
+        if let NodeData::Interior(children) = &mut self.data {
             for child in children.iter_mut() {
                 child.sort_by_key();
             }
-            children.sort_by(|a, b| a.key_part().cmp(b.key_part()));
+            children.sort_by(|a, b| a.key_part.cmp(&b.key_part));
         }
     }
 
@@ -736,7 +729,7 @@ impl<T> Node<T> {
             F: FnMut(&Node<T>) -> O,
             O: Ord,
         {
-            if let Node::Interior { key_prefix: _, children } = cur_node {
+            if let NodeData::Interior(children) = &mut cur_node.data {
                 for child in children.iter_mut() {
                     sort_by_func(child, f);
                 }
@@ -756,9 +749,9 @@ impl<T> Node<T> {
             F: FnMut(&T) -> U,
             G: Fn(U, U) -> U,
         {
-            match cur_node {
-                Node::Leaf { key_rest: _, value } => f_leaf(value),
-                Node::Interior { key_prefix: _, children } => {
+            match &cur_node.data {
+                NodeData::Leaf(value) => f_leaf(value),
+                NodeData::Interior(children) => {
                     // FIXME: Allow an empty trie at the root.
                     children.iter().map(|child| fold(child, f_leaf, f_interior)).reduce(f_interior).expect("empty trie")
                 }
@@ -771,9 +764,9 @@ impl<T> Node<T> {
     where
         T: Sum + Copy
     {
-        match self {
-            Node::Leaf { key_rest: _, value } => *value,
-            Node::Interior { key_prefix: _, children } => children.iter().map(Node::value_sum).sum()
+        match &self.data {
+            NodeData::Leaf(value) => *value,
+            NodeData::Interior(children) => children.iter().map(Node::value_sum).sum()
         }
     }
 
@@ -895,11 +888,11 @@ mod test {
 
     #[test]
     fn test_len_and_is_empty() {
-        let root: Node<u32> = Node::new_root();
+        let root: Node<u32> = Node::empty_root();
         assert_eq!(root.len(), 0);
         assert!(root.is_empty());
 
-        let root = Node::new_leaf("foobar", 42);
+        let root = Node::leaf("foobar", 42);
         assert_eq!(root.len(), 1);
         assert!(!root.is_empty());
 
@@ -964,8 +957,8 @@ mod test {
     fn test_get_all_with_prefix() {
         let root = test_trie();
 
-        assert_eq!(root.get_all_with_prefix("fooqux"), Some(("foo", (&Node::new_leaf("qux", 2)))));
-        assert_eq!(root.get_all_with_prefix("foobarqux"), Some(("foobar", (&Node::new_leaf("qux", 1)))));
+        assert_eq!(root.get_all_with_prefix("fooqux"), Some(("foo", (&Node::leaf("qux", 2)))));
+        assert_eq!(root.get_all_with_prefix("foobarqux"), Some(("foobar", (&Node::leaf("qux", 1)))));
         
         assert_eq!(root.get_all_with_prefix("xyz"), None);
         
@@ -991,8 +984,8 @@ mod test {
 
     #[test]
     fn test_empty_trie() {
-        let root: Node<i32> = Node::new_root();
-        assert_eq!(root, Node::Interior { key_prefix: "".into(), children: Vec::new() });
+        let root: Node<i32> = Node::empty_root();
+        assert_eq!(root, Node::interior("", Vec::new()));
     }
 
     #[test]
@@ -1043,12 +1036,12 @@ mod test {
 
     #[test]
     fn test_insert_into_empty_root() {
-        let mut root: Node<i32> = Node::new_root();
+        let mut root: Node<i32> = Node::empty_root();
         assert_matches!(root.insert::<true>("foo", 1), InsertResult::Ok);
         // The empty interior node shall be replaced by a leaf node.
         assert_eq!(root, Node::from_test_string(r#""foo":1"#));
 
-        let mut root: Node<i32> = Node::new_root();
+        let mut root: Node<i32> = Node::empty_root();
         assert_matches!(root.insert::<true>("", 1), InsertResult::Ok);
         assert_eq!(root, Node::from_test_string(r#""":1"#));
     }
@@ -1097,7 +1090,7 @@ mod test {
 
     #[test]
     fn test_insert_random_strings() {
-        let mut root = Node::new_root();
+        let mut root = Node::empty_root();
         let mut hashmap_reference = HashMap::new();
 
         for (str, value) in random_values(20, 5, 'A'..='C') {
@@ -1159,7 +1152,7 @@ mod test {
 
     #[test]
     fn test_sort_by_key_random() {
-        let mut root = Node::new_root();
+        let mut root = Node::empty_root();
         let mut hashmap_reference = HashMap::new();
         for (str, value) in random_values(20, 5, 'A'..='C') {
             root.insert::<true>(&str, value);
@@ -1190,10 +1183,10 @@ mod test {
     "":4
     "zaz":3
   "qux":1"#);
-        root.sort_by_func(|node| match node {
+        root.sort_by_func(|node| match &node.data {
             // Normally, None is sorted before Some, but we want it the other way around.
-            Node::Leaf { value, .. } => Reverse(Some(Reverse(*value))),
-            Node::Interior { .. } => Reverse(None),
+            NodeData::Leaf(value) => Reverse(Some(Reverse(*value))),
+            NodeData::Interior(_) => Reverse(None),
         });
         assert_eq!(root, Node::from_test_string(r#""foo"
   "qux":1
@@ -1205,7 +1198,7 @@ mod test {
 
     #[test]
     fn test_directory_tree() {
-        let mut root: Node<()> = Node::new_root();
+        let mut root: Node<()> = Node::empty_root();
 
         for entry in walkdir::WalkDir::new(".") {
             let entry = entry.unwrap();

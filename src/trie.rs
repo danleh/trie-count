@@ -10,23 +10,33 @@ use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 // TODO: generalize over generic sequences of K (e.g., bytes) instead of just `&str`.
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Trie<T, F> {
-    root: Node<T>,
-    /// Determines at which points the key string may be split, e.g., only at '/', only at 
-    /// unicode grapheme cluster boundaries, or at any character boundary.
-    key_split_points: F,
+pub struct Trie<T, /*F*/> {
+    // FIXME: Hide this better, provide iterator accessors
+    pub(crate) root: Node<T>,
+
+    // /// Determines at which points the key string may be split, e.g., only at '/', only at 
+    // /// unicode grapheme cluster boundaries, or at any character boundary.
+    // key_split_points: F,
 }
 
-impl<T, F, I, P> Trie<T, F>
-where
-    F: Fn(&str) -> I,
-    I: Iterator<Item = (usize, P)>,
-    P: PartialEq
+impl<T, 
+// F, I, P
+> Trie<T, /*F*/>
+// where
+//     F: Fn(&str) -> I,
+//     I: Iterator<Item = (usize, P)>,
+//     P: PartialEq
 {
-    pub fn new(key_split_points: F) -> Self {
+    // pub fn new(key_split_points: F) -> Self {
+    //     Self {
+    //         root: Node::empty_root(),
+    //         key_split_points,
+    //     }
+    // }
+
+    pub fn new() -> Self {
         Self {
             root: Node::empty_root(),
-            key_split_points,
         }
     }
 
@@ -51,6 +61,10 @@ where
             InsertResult::Replaced { old_value } => Some(old_value),
             InsertResult::NoPrefix { .. } => unreachable!("not possible when inserting into the root node"),
         }
+    }
+
+    pub fn insert_or_update(&mut self, key: &str, value: T, update: impl Fn(&mut T)) {
+        self.root.insert_or_update::<true, ()>(key, value, &update);
     }
 
 //     pub fn by_levels(&self) -> Vec<(&str, usize)> {
@@ -406,14 +420,15 @@ impl<T> Node<T> {
     // FIXME: Relax the `Clone` requirement.
     where T: Clone
     {
-        match self.insert_or_update::<IS_ROOT, T>(insert_key, insert_value.clone(), |old_value| std::mem::replace(old_value, insert_value.clone())) {
+        match self.insert_or_update::<IS_ROOT, T>(insert_key, insert_value.clone(), &|old_value| std::mem::replace(old_value, insert_value.clone())) {
             InsertOrUpdateResult::Inserted => InsertResult::Inserted,
             InsertOrUpdateResult::Updated { result } => InsertResult::Replaced { old_value: result },
             InsertOrUpdateResult::NoPrefix { value } => InsertResult::NoPrefix { value },
         }
     }
 
-    pub fn insert_or_update<const IS_ROOT: bool, U>(&mut self, insert_key: &str, insert_value: T, update: impl Fn(&mut T) -> U) -> InsertOrUpdateResult<T, U> {
+    // TODO: Replace with `entry` API, using `Entry` and `InsertAction`.
+    pub fn insert_or_update<const IS_ROOT: bool, U>(&mut self, insert_key: &str, insert_value: T, update: &impl Fn(&mut T) -> U) -> InsertOrUpdateResult<T, U> {
         let split_result = split_prefix_rest(insert_key, &self.key_part, str::char_indices);
         match (&mut self.data, split_result) {
             // This is a leaf and its key is exactly equal to the insertion key.
@@ -439,7 +454,7 @@ impl<T> Node<T> {
                 // Try to insert into the children.
                 let mut insert_value = insert_value;
                 for child in children.iter_mut() {
-                    match child.insert_or_update::<false, U>(insert_key_rest, insert_value, &update) {
+                    match child.insert_or_update::<false, U>(insert_key_rest, insert_value, update) {
                         // Not successful, so try the next child.
                         InsertOrUpdateResult::NoPrefix { value } => insert_value = value,
                         // Successful (either replaced or inserted a new leaf node), so return.
@@ -791,10 +806,28 @@ pub enum InsertResult<T> {
     NoPrefix { value: T }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum InsertOrUpdateResult<T, U> {
     Inserted,
     Updated { result: U },
     NoPrefix { value: T },
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum Entry<'trie, T> {
+    Present(&'trie mut T),
+    Vacant {
+        node: &'trie mut Node<T>,
+        insert_key_rest: &'trie str,
+        insert_action: InsertAction,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum InsertAction {
+    ReplaceEmptyRoot,
+    AddChild,
+    SplitNode,
 }
 
 // #[cfg(test)]

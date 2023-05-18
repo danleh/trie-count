@@ -14,7 +14,7 @@ use std::io::{self, BufRead, BufReader, BufWriter};
 
 use clap::Parser;
 
-// use crate::trie::Trie;
+use crate::trie::Trie;
 
 mod options;
 mod unicode_bar_chart;
@@ -44,9 +44,10 @@ fn main() -> anyhow::Result<()> {
         let stdin = Box::leak(Box::new(io::stdin()));
         Box::new(stdin.lock())
     };
-    // for line in input.lines() {
-    //     trie.insert(&line?);
-    // }
+    let mut trie = Trie::new();
+    for line in input.lines() {
+        trie.insert_or_update(&line?, 1, |count| *count += 1);
+    }
 
     // Optionally sort trie by subtree sizes.
     // if options.sort_by_count {
@@ -76,17 +77,32 @@ fn main() -> anyhow::Result<()> {
     //     }
     // }
 
-    let root = trie::Node::from_test_string(r#""foo"
-  "bar"
-    "":0
-    "qux":1
-  "qux":2
-  "":3"#);
-    let sum = test_internal_iter_values(&root);
-    println!("{sum}");
+    trie.root.internal_iter_items(|key_parts, value| {
+        let (first, rest) = key_parts.split_first().expect("must be at least one key part");
+        if !first.is_empty() {
+            write!(output, "{}", options.indent_with).unwrap();
+        }
+        for _ in rest {
+            write!(output, "{}", options.indent_with).unwrap();
+        }
+        write!(output, "'{}'", key_parts.last().expect("must be at least one key part")).unwrap();
+        if let Some(value) = value {
+            write!(output, ": {value}").unwrap();
+        }
+        writeln!(output).unwrap();
+    });
 
-    let sum2 = test_external_iter_values(&root);
-    println!("{sum2}");
+//     let root = trie::Node::from_test_string(r#""foo"
+//   "bar"
+//     "":0
+//     "qux":1
+//   "qux":2
+//   "":3"#);
+//     let sum = test_internal_iter_values(&root);
+//     println!("{sum}");
+
+//     let sum2 = test_external_iter_values(&root);
+//     println!("{sum2}");
 
     Ok(())
 }

@@ -3,7 +3,7 @@
 // and https://github.com/miedzinski/prefix-tree
 // and https://en.wikipedia.org/wiki/Radix_tree
 
-use std::{str::FromStr, marker::PhantomData, iter::Sum};
+use std::{str::FromStr, marker::PhantomData, iter::Sum, borrow::Borrow};
 
 use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 
@@ -95,67 +95,45 @@ pub enum NodeData<T> {
     Interior(Vec<Node<T>>),
 }
 
-// The `KeyStack` trait is essentially a lending iterator, because it returns a key representation
-// that can borrow not only from the trie, but also from the key stack itself.
-// This is a trait with multiple implementations, e.g., one where the keys are not tracked at all
-// (essentially nops, optimized away), and one where keys are tracked in an auxiliary stack.
-// Unfortunately, this trait requires GATs (generic associated types), which even after 
-// stabilization suffer from a serious compiler bug/limitation, namely that lifetimes in GATs lead
-// to an inferred 'static bound for the closure type in the internal iterator functions below :(.
-// See https://blog.rust-lang.org/2022/10/28/gats-stabilization.html#implied-static-requirement-from-higher-ranked-trait-bounds
-// Hence, we rely on an encoding/polyfill of lifetime-GATs that work even before Rust 1.65 and
-// which actually do NOT suffer from this limitation!
-// See https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats
-// and https://github.com/danielhenrymantilla/nougat.rs.
-// I didn't want to  to include a whole dependency (nougat.rs) just for essentially two lines of
-// code (the additional trait and weird default type parameter), so I used the method described
-// by Sabrina Jewson in her blog above. Great work and thanks to her for sharing this!
-// This trait is just to avoid duplicated implementations, so I did not use the sealed bounds
-// variant that she describes as well, since it adds even more complexity.
-pub trait KeyWithLifetime<'this, ImplicitBounds = &'this Self> {
-    type Key;
-}
+/// Trait for abstracting over the tracking of keys in the iteratior:
+/// Either the keys are tracked (and the current `KeyParts` stored in the `KeyStack`),
+/// or not tracked at all (in which case `KeyParts` is `()`).
+pub trait KeyStack<'trie> : Borrow<Self::KeyParts> {
+    type KeyParts: ?Sized;
+    fn current_key_parts(&self) -> &Self::KeyParts {
+        self.borrow()
+    }
 
-pub trait KeyStack<'trie> : for<'any /* where Self: 'any */> KeyWithLifetime<'any> {
     fn push(&mut self, key_part: &'trie str);
-    fn get_current(&self) -> <Self as KeyWithLifetime>::Key;
     fn pop(&mut self);
 }
 
 /// Implementation for not tracking/returning the key at all.
-impl KeyWithLifetime<'_> for () {
-    type Key = ();
-}
 impl KeyStack<'_> for () {
+    type KeyParts = ();
     fn push(&mut self, _: &str) {}
-    fn get_current(&self) {}
     fn pop(&mut self) {}
 }
 
-/// Implementation for returning the key as a `&[&str]` slice.
-/// This is the most efficient key representation (if tracking keys at all), since it avoids copying
-/// the key parts and does not require a heap allocation for each key/iteration.
-impl<'this, 'trie> KeyWithLifetime<'this> for Vec<&'trie str> {
-    type Key = &'this [&'trie str];
-}
+/// Implementation for returning the key as parts in a `&[&str]` slice (which doesn't require
+/// allocating, but borrows from the iterator, specifically the key stack).
 impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
+    type KeyParts = [&'trie str];
     fn push(&mut self, key_part: &'trie str) {
         self.push(key_part);
-    }
-    fn get_current(&self) -> <Self as KeyWithLifetime>::Key {
-        self.as_slice()
     }
     fn pop(&mut self) {
         self.pop();
     }
 }
 
-/// Trait for abstracting over values, either both leafs and interior nodes, or only leafs.
+/// Trait for abstracting over `Value`s returned by the iterator:
+/// Either both leafs and interior nodes are returned, or only leafs.
 pub trait Value<'trie, T> : Sized {
     fn from(node: &'trie Node<T>) -> Option<Self>;
 }
 
-/// Implementation for only iterating over leaf nodes (which always have a value).
+/// Implementation for iterating only over leaf nodes (which always have a value).
 impl<'trie, T> Value<'trie, T> for &'trie T {
     fn from(node: &'trie Node<T>) -> Option<Self> {
         node.value()
@@ -185,21 +163,21 @@ pub struct Iter<'trie, T, K, V> {
 
 // Cannot implement the `Iterator` trait from the standard library because `next` borrows from the
 // iterator itself (when returning the key parts).
-impl<'trie, T, K, V> Iter<'trie, T, K, V>
+impl<'trie, T, KS, V> Iter<'trie, T, KS, V>
 where
-    K: KeyStack<'trie> + Default,
+    KS: KeyStack<'trie> + Default,
     V: Value<'trie, T>,
 {
     pub fn new(root: &'trie Node<T>) -> Self {
         Self {
             node_stack: vec![Some(root)],
-            key_parts_stack: K::default(),
+            key_parts_stack: KS::default(),
             value_representation: PhantomData,
         }
     }
 
     #[allow(clippy::needless_lifetimes)]
-    pub fn next<'next>(&'next mut self) -> Option<(<K as KeyWithLifetime<'next>>::Key, V)> {
+    pub fn next<'next>(&'next mut self) -> Option<(&'next KS::KeyParts, V)> {
         while let Some(cur_node) = self.node_stack.pop() {
             match cur_node {
                 Some(node) => {
@@ -209,7 +187,7 @@ where
                     // Process the children next, i.e., depth-first traversal.
                     self.node_stack.extend(node.children().rev().map(Some));
                     if let Some(value) = V::from(node) {
-                        return Some((self.key_parts_stack.get_current(), value));
+                        return Some((self.key_parts_stack.current_key_parts(), value));
                     }
                 }
                 None => self.key_parts_stack.pop(),
@@ -292,15 +270,15 @@ impl<T> Node<T> {
     // Iterators:
 
     /// Generic interior pre-order depth-first traversal of the trie, configurable by `K` and `V`.
-    fn internal_iter_generic<'trie, K, V, F>(&'trie self, key_parts_stack: &mut K, f: &mut F)
+    fn internal_iter_generic<'trie, KS, V, F>(&'trie self, key_parts_stack: &mut KS, f: &mut F)
     where
-        K: KeyStack<'trie>,
+        KS: KeyStack<'trie>,
         V: Value<'trie, T>,
-        F: for<'any> FnMut(<K as KeyWithLifetime<'any>>::Key, V)
+        F: FnMut(&KS::KeyParts, V)
     {
         key_parts_stack.push(&self.key_part);
         if let Some(value) = V::from(self) {
-            f(key_parts_stack.get_current(), value);
+            f(key_parts_stack.current_key_parts(), value);
         }
         for child in self.children() {
             child.internal_iter_generic(key_parts_stack, f);
@@ -685,7 +663,7 @@ impl<T> Node<T> {
         str_acc
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub fn from_test_string(str: &str) -> Self
         where T: FromStr,
               <T as FromStr>::Err: std::fmt::Debug,

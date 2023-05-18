@@ -219,48 +219,6 @@ where
     }
 }
 
-/// ASCII Art of this trie:
-/// "foo"
-/// ├── "bar"
-/// │   └── "" -> 0
-/// │   └── "qux" -> 1
-/// ├── "qux" -> 2
-/// └── "" -> 3
-#[cfg(test)]
-fn test_trie() -> Node<u32> {
-    Node::interior("foo", vec![
-        Node::interior("bar", vec![
-            Node::leaf("", 0),
-            Node::leaf("qux", 1),
-        ]),
-        Node::leaf("qux", 2),
-        Node::leaf("", 3),
-    ])
-}
-
-#[test]
-fn test_iter_lending() {
-    let root = test_trie();
-    let mut iter = root.external_iter_items_leafs();
-    assert_eq!(iter.next(), Some((&["foo", "bar", ""][..], &0)));
-    assert_eq!(iter.next(), Some((&["foo", "bar", "qux"][..], &1)));
-    assert_eq!(iter.next(), Some((&["foo", "qux"][..], &2)));
-    assert_eq!(iter.next(), Some((&["foo", ""][..], &3)));
-    assert_eq!(iter.next(), None);
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum InsertResult<T> {
-    Ok,
-    Replaced { old_value: T },
-    NoPrefix { value: T }
-}
-
-// #[cfg(test)]
-const TEST_INDENT: &str = "  ";
-// #[cfg(test)]
-const TEST_DELIM: &str = ":";
-
 impl<T> Node<T> {
 
     // Constructors:
@@ -389,101 +347,6 @@ impl<T> Node<T> {
         Iter::new(self)
     }
 
-
-    // Utility functions for testing:
-
-    #[cfg(test)]
-    fn to_test_string(&self) -> String
-        where T: std::fmt::Debug
-    {
-        use std::fmt::Write;
-        let mut str_acc = String::new();
-        let mut iter = self.external_iter_items();
-        while let Some((key_parts, maybe_value)) = iter.next() {
-            let level = key_parts.len() - 1;
-            for _ in 0..level {
-                str_acc.push_str(TEST_INDENT);
-            }
-            write!(str_acc, "{:?}", key_parts.last().unwrap()).unwrap();
-            if let Some(value) = maybe_value { // Leaf.
-                write!(str_acc, "{TEST_DELIM}{value:?}").unwrap();
-            }
-            str_acc.push('\n');
-        }
-        str_acc.pop(); // Remove trailing newline.
-        str_acc
-    }
-
-    // "foo"
-    //   "bar"
-    //     ""
-    //       "qux":1
-    //       "":2
-    //       "quz":3
-    //   "test"
-    //     "qux":2
-    //   "":3
-
-    // #[cfg(test)]
-    pub fn from_test_string(str: &str) -> Self
-        where T: FromStr,
-              <T as FromStr>::Err: std::fmt::Debug,
-    {
-        fn parse_line<T>(mut line: &str) -> (isize, &str, Option<T>)
-            where
-                T: FromStr,
-                <T as FromStr>::Err: std::fmt::Debug
-        {
-            let mut level = 0;
-            while let Some(rest) = line.strip_prefix(TEST_INDENT) {
-                line = rest;
-                level += 1;
-            }
-
-            let (key_part, value) = match line.rsplit_once(TEST_DELIM) {
-                Some((key_part, value_str)) => {
-                    let value: T = value_str.parse().unwrap();
-                    (key_part, Some(value))
-                }
-                None => (line, None),
-            };
-
-            let key = key_part.strip_prefix('"').unwrap().strip_suffix('"').unwrap();
-
-            (level, key, value)
-        }
-
-        let mut subtries = Vec::new();
-
-        for line in str.lines().rev() {
-            let (level, key_part, maybe_value) = parse_line::<T>(line);
-
-            match maybe_value {
-                Some(value) => {
-                    subtries.push((level, Node::leaf(key_part, value)));
-                },
-                None => {
-                    let mut children = Vec::new();
-                    while let Some((subtrie_level, _)) = subtries.last() {
-                        if *subtrie_level == level + 1 {
-                            // Subtrie is child of current node at `level`.
-                            children.push(subtries.pop().unwrap().1);
-                        } else if *subtrie_level <= level {
-                            break;
-                        } else if *subtrie_level >= level + 2 {
-                            panic!("missing intermediate node in trie");
-                        } else {
-                            unreachable!();
-                        }
-                    }
-                    subtries.push((level, Node::interior(key_part, children))); 
-                },
-            }
-        }
-
-        assert_eq!(subtries.len(), 1, "more than one root node");
-        subtries.pop().unwrap().1
-    }
 
 //     fn sort_by_count(&mut self) {
 //         self.children.sort_by_cached_key(|node| std::cmp::Reverse(node.len()));
@@ -687,27 +550,6 @@ impl<T> Node<T> {
         todo!()
     }
 
-    #[cfg(test)]
-    fn assert_invariants<const IS_ROOT: bool>(&self)
-    where T: std::fmt::Debug
-    {
-        if let NodeData::Interior(children) = &self.data {
-            if !IS_ROOT {
-                assert!(!self.key_part.is_empty(), "invariant violated: interior nodes (except the root node) must have a non-empty key part\n{self:?}");
-                assert!(children.len() > 1, "invariant violated: interior nodes (except the empty root node) must have at least two children\n{self:?}");
-            }
-            for (i, child1) in children.iter().enumerate() {
-                for child2 in &children[i+1..] {
-                    let split_result = split_prefix_rest(&child1.key_part, &child2.key_part, str::char_indices);
-                    assert!(split_result.common_prefix.is_empty(), "invariant violated: children of interior nodes must not have a common prefix\n{self:?}");
-                }
-            }
-            for child in children {
-                child.assert_invariants::<false>();
-            }
-        }
-    }
-
     /// Sorts the children alphabetically by their key.
     pub fn sort_by_key(&mut self) {
         if let NodeData::Interior(children) = &mut self.data {
@@ -821,6 +663,113 @@ impl<T> Node<T> {
     //     }
     //     sort_by_bottomup_value_fold::<T, F, G, O>(self, &mut f_leaf, &mut f_interior);
     // }
+
+
+    // Utility functions for testing:
+
+    #[cfg(test)]
+    fn to_test_string(&self) -> String
+        where T: std::fmt::Debug
+    {
+        use std::fmt::Write;
+        let mut str_acc = String::new();
+        let mut iter = self.external_iter_items();
+        while let Some((key_parts, maybe_value)) = iter.next() {
+            let level = key_parts.len() - 1;
+            for _ in 0..level {
+                str_acc.push_str(TEST_INDENT);
+            }
+            write!(str_acc, "{:?}", key_parts.last().unwrap()).unwrap();
+            if let Some(value) = maybe_value { // Leaf.
+                write!(str_acc, "{TEST_DELIM}{value:?}").unwrap();
+            }
+            str_acc.push('\n');
+        }
+        str_acc.pop(); // Remove trailing newline.
+        str_acc
+    }
+
+    #[cfg(test)]
+    pub fn from_test_string(str: &str) -> Self
+        where T: FromStr,
+              <T as FromStr>::Err: std::fmt::Debug,
+    {
+        fn parse_line<T>(mut line: &str) -> (isize, &str, Option<T>)
+            where
+                T: FromStr,
+                <T as FromStr>::Err: std::fmt::Debug
+        {
+            let mut level = 0;
+            while let Some(rest) = line.strip_prefix(TEST_INDENT) {
+                line = rest;
+                level += 1;
+            }
+
+            let (key_part, value) = match line.rsplit_once(TEST_DELIM) {
+                Some((key_part, value_str)) => {
+                    let value: T = value_str.parse().unwrap();
+                    (key_part, Some(value))
+                }
+                None => (line, None),
+            };
+
+            let key = key_part.strip_prefix('"').unwrap().strip_suffix('"').unwrap();
+
+            (level, key, value)
+        }
+
+        let mut subtries = Vec::new();
+
+        for line in str.lines().rev() {
+            let (level, key_part, maybe_value) = parse_line::<T>(line);
+
+            match maybe_value {
+                Some(value) => {
+                    subtries.push((level, Node::leaf(key_part, value)));
+                },
+                None => {
+                    let mut children = Vec::new();
+                    while let Some((subtrie_level, _)) = subtries.last() {
+                        if *subtrie_level == level + 1 {
+                            // Subtrie is child of current node at `level`.
+                            children.push(subtries.pop().unwrap().1);
+                        } else if *subtrie_level <= level {
+                            break;
+                        } else if *subtrie_level >= level + 2 {
+                            panic!("missing intermediate node in trie");
+                        } else {
+                            unreachable!();
+                        }
+                    }
+                    subtries.push((level, Node::interior(key_part, children))); 
+                },
+            }
+        }
+
+        assert_eq!(subtries.len(), 1, "more than one root node");
+        subtries.pop().unwrap().1
+    }
+
+    #[cfg(test)]
+    fn assert_invariants<const IS_ROOT: bool>(&self)
+    where T: std::fmt::Debug
+    {
+        if let NodeData::Interior(children) = &self.data {
+            if !IS_ROOT {
+                assert!(!self.key_part.is_empty(), "invariant violated: interior nodes (except the root node) must have a non-empty key part\n{self:?}");
+                assert!(children.len() > 1, "invariant violated: interior nodes (except the empty root node) must have at least two children\n{self:?}");
+            }
+            for (i, child1) in children.iter().enumerate() {
+                for child2 in &children[i+1..] {
+                    let split_result = split_prefix_rest(&child1.key_part, &child2.key_part, str::char_indices);
+                    assert!(split_result.common_prefix.is_empty(), "invariant violated: children of interior nodes must not have a common prefix\n{self:?}");
+                }
+            }
+            for child in children {
+                child.assert_invariants::<false>();
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -857,6 +806,48 @@ where
 
     SplitResult { common_prefix, left_rest, right_rest }
 }
+
+/// ASCII Art of this trie:
+/// "foo"
+/// ├── "bar"
+/// │   └── "" -> 0
+/// │   └── "qux" -> 1
+/// ├── "qux" -> 2
+/// └── "" -> 3
+#[cfg(test)]
+fn test_trie() -> Node<u32> {
+    Node::interior("foo", vec![
+        Node::interior("bar", vec![
+            Node::leaf("", 0),
+            Node::leaf("qux", 1),
+        ]),
+        Node::leaf("qux", 2),
+        Node::leaf("", 3),
+    ])
+}
+
+#[test]
+fn test_iter_lending() {
+    let root = test_trie();
+    let mut iter = root.external_iter_items_leafs();
+    assert_eq!(iter.next(), Some((&["foo", "bar", ""][..], &0)));
+    assert_eq!(iter.next(), Some((&["foo", "bar", "qux"][..], &1)));
+    assert_eq!(iter.next(), Some((&["foo", "qux"][..], &2)));
+    assert_eq!(iter.next(), Some((&["foo", ""][..], &3)));
+    assert_eq!(iter.next(), None);
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum InsertResult<T> {
+    Ok,
+    Replaced { old_value: T },
+    NoPrefix { value: T }
+}
+
+// #[cfg(test)]
+const TEST_INDENT: &str = "  ";
+// #[cfg(test)]
+const TEST_DELIM: &str = ":";
 
 #[cfg(test)]
 mod test {

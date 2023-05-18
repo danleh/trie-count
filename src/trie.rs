@@ -42,9 +42,12 @@ where
         self.root = Node::empty_root();
     }
 
-    pub fn insert(&mut self, key: &str, value: T) -> Option<T> {
+    pub fn insert(&mut self, key: &str, value: T) -> Option<T>
+    // FIXME: Relax the `Clone` requirement.
+    where T: Clone
+    {
         match self.root.insert::<true>(key, value) {
-            InsertResult::Ok => None,
+            InsertResult::Inserted => None,
             InsertResult::Replaced { old_value } => Some(old_value),
             InsertResult::NoPrefix { .. } => unreachable!("not possible when inserting into the root node"),
         }
@@ -399,14 +402,25 @@ impl<T> Node<T> {
             .map(|(key_matched_len, subtrie)| (&key_query[..key_matched_len], subtrie))
     }
 
-    pub fn insert<const IS_ROOT: bool>(&mut self, insert_key: &str, insert_value: T) -> InsertResult<T> {
+    pub fn insert<const IS_ROOT: bool>(&mut self, insert_key: &str, insert_value: T) -> InsertResult<T>
+    // FIXME: Relax the `Clone` requirement.
+    where T: Clone
+    {
+        match self.insert_or_update::<IS_ROOT, T>(insert_key, insert_value.clone(), |old_value| std::mem::replace(old_value, insert_value.clone())) {
+            InsertOrUpdateResult::Inserted => InsertResult::Inserted,
+            InsertOrUpdateResult::Updated { result } => InsertResult::Replaced { old_value: result },
+            InsertOrUpdateResult::NoPrefix { value } => InsertResult::NoPrefix { value },
+        }
+    }
+
+    pub fn insert_or_update<const IS_ROOT: bool, U>(&mut self, insert_key: &str, insert_value: T, update: impl Fn(&mut T) -> U) -> InsertOrUpdateResult<T, U> {
         let split_result = split_prefix_rest(insert_key, &self.key_part, str::char_indices);
         match (&mut self.data, split_result) {
             // This is a leaf and its key is exactly equal to the insertion key.
             // -> Replace the value.
             (NodeData::Leaf(value), SplitResult { common_prefix: _, left_rest: "", right_rest: "" }) => {
-                let old_value = std::mem::replace(value, insert_value);
-                InsertResult::Replaced { old_value }
+                let result = update(value);
+                InsertOrUpdateResult::Updated { result }
             }
 
             // This is the "initial" empty root (an interior node with an empty key and no children).
@@ -416,7 +430,7 @@ impl<T> Node<T> {
                 debug_assert!(right_rest.is_empty());
 
                 *self = Node::leaf(insert_key, insert_value);
-                InsertResult::Ok
+                InsertOrUpdateResult::Inserted
             }
 
             // This is an interior node and its key is a prefix of the `insert_key`.
@@ -425,9 +439,9 @@ impl<T> Node<T> {
                 // Try to insert into the children.
                 let mut insert_value = insert_value;
                 for child in children.iter_mut() {
-                    match child.insert::<false>(insert_key_rest, insert_value) {
+                    match child.insert_or_update::<false, U>(insert_key_rest, insert_value, &update) {
                         // Not successful, so try the next child.
-                        InsertResult::NoPrefix { value } => insert_value = value,
+                        InsertOrUpdateResult::NoPrefix { value } => insert_value = value,
                         // Successful (either replaced or inserted a new leaf node), so return.
                         insert_result => return insert_result
                     }
@@ -437,7 +451,7 @@ impl<T> Node<T> {
                 // so we must create a new leaf node.
                 let insert_new_leaf = Node::leaf(insert_key_rest, insert_value);
                 children.push(insert_new_leaf);
-                InsertResult::Ok
+                InsertOrUpdateResult::Inserted
             }
 
             // The insertion key and the current node's key don't have a common prefix,
@@ -446,7 +460,7 @@ impl<T> Node<T> {
             // among all strings in the trie). In this case, we fall through to the next match arm
             // which will split the root into a new root with an empty key.
             (_, SplitResult { common_prefix: "", left_rest: _insert_key, right_rest: _self_key }) if !IS_ROOT => {
-                InsertResult::NoPrefix { value: insert_value }
+                InsertOrUpdateResult::NoPrefix { value: insert_value }
             }
 
             // General case: The insertion key and the current node's key have a non-empty common prefix.
@@ -464,14 +478,9 @@ impl<T> Node<T> {
                     }
                     _ => unreachable!("we just replaced self with a new interior node")
                 }
-                InsertResult::Ok
+                InsertOrUpdateResult::Inserted
             }
         }
-    }
-
-    pub fn insert_or_update(&mut self, key: &str, insert_value: T, update: impl FnOnce(&mut T)) -> InsertResult<T> {
-        // TODO: Based on `insert`.
-        todo!()
     }
 
     pub fn remove_exact(&mut self, key: &str) -> Option<T> {
@@ -777,9 +786,15 @@ fn test_iter_lending() {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum InsertResult<T> {
-    Ok,
+    Inserted,
     Replaced { old_value: T },
     NoPrefix { value: T }
+}
+
+pub enum InsertOrUpdateResult<T, U> {
+    Inserted,
+    Updated { result: U },
+    NoPrefix { value: T },
 }
 
 // #[cfg(test)]
@@ -920,7 +935,7 @@ mod test {
     #[test]
     fn test_insert_into_empty_leaf() {
         let mut root = Node::from_test_string(r#""":1"#);
-        assert_matches!(root.insert::<true>("foo", 2), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("foo", 2), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#"""
   "":1
   "foo":2"#));
@@ -929,7 +944,7 @@ mod test {
     #[test]
     fn test_insert_empty_key() {
         let mut root = Node::from_test_string(r#""foo":1"#);
-        assert_matches!(root.insert::<true>("", 2), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("", 2), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#"""
   "foo":1
   "":2"#));
@@ -945,19 +960,19 @@ mod test {
     #[test]
     fn test_insert_split_leaf() {
         let mut root = Node::from_test_string(r#""foo":1"#);
-        assert_matches!(root.insert::<true>("foobar", 2), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("foobar", 2), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#""foo"
   "":1
   "bar":2"#));
 
         let mut root = Node::from_test_string(r#""foobar":1"#);
-        assert_matches!(root.insert::<true>("foo", 2), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("foo", 2), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#""foo"
   "bar":1
   "":2"#));
 
         let mut root = Node::from_test_string(r#""foo":1"#);
-        assert_matches!(root.insert::<true>("bar", 2), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("bar", 2), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#"""
   "foo":1
   "bar":2"#));
@@ -966,12 +981,12 @@ mod test {
     #[test]
     fn test_insert_into_empty_root() {
         let mut root: Node<i32> = Node::empty_root();
-        assert_matches!(root.insert::<true>("foo", 1), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("foo", 1), InsertResult::Inserted);
         // The empty interior node shall be replaced by a leaf node.
         assert_eq!(root, Node::from_test_string(r#""foo":1"#));
 
         let mut root: Node<i32> = Node::empty_root();
-        assert_matches!(root.insert::<true>("", 1), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("", 1), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#""":1"#));
     }
 
@@ -980,7 +995,7 @@ mod test {
         let mut root = Node::from_test_string(r#""foo"
   "bar":1
   "qux":2"#);
-        assert_matches!(root.insert::<true>("foozaz", 3), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("foozaz", 3), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#""foo"
   "bar":1
   "qux":2
@@ -992,7 +1007,7 @@ mod test {
         let mut root = Node::from_test_string(r#""foo"
   "bar":1
   "qux":2"#);
-        assert_matches!(root.insert::<true>("foobaz", 3), InsertResult::Ok);
+        assert_matches!(root.insert::<true>("foobaz", 3), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#""foo"
   "ba"
     "r":1
@@ -1031,7 +1046,7 @@ mod test {
 
             let result_reference = hashmap_reference.insert(str, value);
             match (&result, result_reference) {
-                (InsertResult::Ok, None) => {},
+                (InsertResult::Inserted, None) => {},
                 (InsertResult::Replaced { old_value }, Some(old_value_reference)) if *old_value == old_value_reference => {},
                 _ => panic!("mismatch between reference HashMap and trie result\nHashMap: {result_reference:?}\ntrie:{result:?}"),
             }

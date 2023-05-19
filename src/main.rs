@@ -55,9 +55,17 @@ fn main() -> anyhow::Result<()> {
             line = line.trim();
         }
 
+        struct CountedLine<'a>(u64, &'a str);
+        impl<'a> TryFrom<&'a str> for CountedLine<'a> {
+            type Error;
+            fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+        todo!()
+    }
+        }
+
         let (count, line) = if options.counted_input {
             // split line once into count and rest of line.
-            // FIXME: Make this more robust: error report if count is not a number, trim lines
+            // FIXME: Make this more robust: better error report with input line and line number, if count is not a number or if it doesn't match the pattern
             let (count, rest) = line.split_once(|c: char| c.is_whitespace()).expect("line must begin with count, followed by whitespace");
             let count: u64 = count.parse()?;
             (count, rest)

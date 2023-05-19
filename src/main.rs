@@ -48,15 +48,23 @@ fn main() -> anyhow::Result<()> {
     };
     let mut trie = Trie::new();
     for line in input.lines() {
-        let line = line?;
+        let line_string = line?;
+
+        let mut line = line_string.as_str();
+        if options.trim_input {
+            line = line.trim();
+        }
+
         let (count, line) = if options.counted_input {
             // split line once into count and rest of line.
+            // FIXME: Make this more robust: error report if count is not a number, trim lines
             let (count, rest) = line.split_once(|c: char| c.is_whitespace()).expect("line must begin with count, followed by whitespace");
             let count: u64 = count.parse()?;
             (count, rest)
         } else {
-            (1, line.as_str())
+            (1, line)
         };
+
         trie.insert_or_update(line, count, |current| *current += count);
     }
 

@@ -20,11 +20,17 @@ pub struct Options {
     #[clap(short, long = "out")]
     pub output: Option<PathBuf>,
 
-    /// Sort the trie either by the count of contained elements, i.e., largest subtrees come first,
-    /// or alphabetically.
-    /// [default: false, i.e., insertion order]
-    #[clap(short, long, value_name = "c[ount]|a[lpha]")]
-    pub sort: Option<SortOrder>,
+    /// Trim leading and trailing whitespace from each line.
+    /// [default: false]
+    #[clap(short, long)]
+    pub trim_input: bool,
+
+    /// Split only at the given character(s). Can be given multiple times.
+    /// For example, -d'/' -d'.' is useful to build a trie of paths, splitting only at directories and file extensions.
+    /// [default: split at every character]
+    /// TODO: Make this a regex, not a single character.
+    #[clap(short = 'd', long, value_name = "CHAR")]
+    pub split_delimiter: Vec<char>,
 
     /// Each input line starts with a count of how often to count the following string.
     /// Example: "42 foo" counts the string "foo" 42 times.
@@ -32,12 +38,11 @@ pub struct Options {
     #[clap(short, long)]
     pub counted_input: bool,
 
-    /// Split only at the given character(s). Can be given multiple times.
-    /// For example, -d'/' -d'.' is useful to build a trie of paths, splitting only at directories and file extensions.
-    /// [default: split at every character]
-    /// TODO: Make this a string, not a single character.
-    #[clap(short = 'd', long, value_name = "CHAR")]
-    pub split_delimiter: Vec<char>,
+    /// Sort the trie either by the count of contained elements, i.e., largest subtrees come first,
+    /// or alphabetically.
+    /// [default: false, i.e., insertion order]
+    #[clap(short, long, value_name = "c[ount]|a[lpha]")]
+    pub sort: Option<SortOrder>,
 
     /// Character(s) with which to indent levels of the tree. [default: '  ']
     #[clap(

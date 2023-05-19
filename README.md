@@ -40,7 +40,7 @@ Advanced example, combining with other UNIX tools, e.g., summing words in a dire
       42 src/main.rs
     1337 src/options.rs
 
-    $ find -type f | xargs wc -w | head -n-1 | tc -d'/' -s
+    $ find -type f | xargs wc -w | head -n-1 | tc -c -d'/' -s
     1379 src/
       1337 options.rs
       42   main.rs

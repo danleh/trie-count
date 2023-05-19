@@ -1,0 +1,6 @@
+5 this
+2 blabla
+1 foobar
+3 foo
+10 this
+0 no way

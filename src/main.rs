@@ -46,7 +46,16 @@ fn main() -> anyhow::Result<()> {
     };
     let mut trie = Trie::new();
     for line in input.lines() {
-        trie.insert_or_update(&line?, 1, |count| *count += 1);
+        let line = line?;
+        let (count, line) = if options.counted_input {
+            // split line once into count and rest of line.
+            let (count, rest) = line.split_once(|c: char| c.is_whitespace()).expect("line must begin with count, followed by whitespace");
+            let count = count.parse::<usize>()?;
+            (count, rest)
+        } else {
+            (1, line.as_str())
+        };
+        trie.insert_or_update(line, count, |current| *current += count);
     }
 
     // Optionally sort trie by subtree sizes.
@@ -77,6 +86,8 @@ fn main() -> anyhow::Result<()> {
     //     }
     // }
 
+    trie.root.sort_by_key();
+
     trie.root.internal_iter_items(|key_parts, value| {
         let (first, rest) = key_parts.split_first().expect("must be at least one key part");
         if !first.is_empty() {
@@ -91,6 +102,8 @@ fn main() -> anyhow::Result<()> {
         }
         writeln!(output).unwrap();
     });
+
+    // TODO: Aggregate counts of subtries.
 
 //     let root = trie::Node::from_test_string(r#""foo"
 //   "bar"

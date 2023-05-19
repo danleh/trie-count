@@ -1,5 +1,6 @@
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use clap::Parser;
 use clap::ValueHint;
@@ -16,13 +17,14 @@ pub struct Options {
     pub input: Option<PathBuf>,
 
     /// Output file to write the trie to. [default: stdout]
-    #[clap(short)]
+    #[clap(short, long = "out")]
     pub output: Option<PathBuf>,
 
-    /// Sort the trie nodes by the count of contained elements, i.e., largest subtrees come first.
-    /// [default: false]
-    #[clap(short, long)]
-    pub sort_by_count: bool,
+    /// Sort the trie either by the count of contained elements, i.e., largest subtrees come first,
+    /// or alphabetically.
+    /// [default: false, i.e., insertion order]
+    #[clap(short, long, value_name = "c[ount]|a[lpha]")]
+    pub sort: Option<SortOrder>,
 
     /// Each input line starts with a count of how often to count the following string.
     /// Example: "42 foo" counts the string "foo" 42 times.
@@ -62,12 +64,30 @@ pub struct Options {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum SortOrder {
+    Count,
+    Alphabetical,
+}
+
+impl FromStr for SortOrder {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "c" | "count" => Ok(SortOrder::Count),
+            "a" | "alpha" | "alphabetical" => Ok(SortOrder::Alphabetical),
+            _ => Err("sort order must be either 'count' or 'alpha'"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum Threshold {
     Count(NonZeroUsize),
     Fraction(Fraction),
 }
 
-impl std::str::FromStr for Threshold {
+impl FromStr for Threshold {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -83,7 +103,7 @@ impl std::str::FromStr for Threshold {
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Fraction(f32);
 
-impl std::str::FromStr for Fraction {
+impl FromStr for Fraction {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {

@@ -19,6 +19,8 @@ use crate::trie::Trie;
 mod options;
 mod unicode_bar_chart;
 
+mod count_tree;
+
 pub mod trie;
 
 const BAR_WIDTH: usize = 20;
@@ -50,7 +52,7 @@ fn main() -> anyhow::Result<()> {
         let (count, line) = if options.counted_input {
             // split line once into count and rest of line.
             let (count, rest) = line.split_once(|c: char| c.is_whitespace()).expect("line must begin with count, followed by whitespace");
-            let count = count.parse::<usize>()?;
+            let count: u64 = count.parse()?;
             (count, rest)
         } else {
             (1, line.as_str())
@@ -58,10 +60,15 @@ fn main() -> anyhow::Result<()> {
         trie.insert_or_update(line, count, |current| *current += count);
     }
 
-    // Optionally sort trie by subtree sizes.
-    // if options.sort_by_count {
-    //     trie.sort_by_count();
-    // }
+    // Convert the trie to a tree, where each subtree contains the count of all its children.
+    let mut count_tree = count_tree::Node::from(&trie);
+
+    // Optionally sort by subtree sizes.
+    match options.sort {
+        Some(options::SortOrder::Count) => count_tree.sort_by_count_desc(),
+        Some(options::SortOrder::Alphabetical) => count_tree.sort_by_str(),
+        None => {}
+    };
 
     // Write trie to output.
     let mut output: Box<dyn io::Write> = if let Some(file) = options.output {
@@ -86,24 +93,30 @@ fn main() -> anyhow::Result<()> {
     //     }
     // }
 
-    trie.root.sort_by_key();
+    // trie.root.internal_iter_items(|key_parts, value| {
+    //     let (first, rest) = key_parts.split_first().expect("must be at least one key part");
+    //     if !first.is_empty() {
+    //         write!(output, "{}", options.indent_with).unwrap();
+    //     }
+    //     for _ in rest {
+    //         write!(output, "{}", options.indent_with).unwrap();
+    //     }
+    //     write!(output, "'{}'", key_parts.last().expect("must be at least one key part")).unwrap();
+    //     if let Some(value) = value {
+    //         write!(output, ": {value}").unwrap();
+    //     }
+    //     writeln!(output).unwrap();
+    // });
 
-    trie.root.internal_iter_items(|key_parts, value| {
-        let (first, rest) = key_parts.split_first().expect("must be at least one key part");
-        if !first.is_empty() {
-            write!(output, "{}", options.indent_with).unwrap();
+    fn print_tree(output: &mut impl io::Write, node: &count_tree::Node, level: usize, indent_with: &str) -> io::Result<()> {
+        write!(output, "{}", indent_with.repeat(level))?;
+        writeln!(output, "{} '{}'", node.count, node.str)?;
+        for child in node.children.iter() {
+            print_tree(output, child, level + 1, indent_with)?;
         }
-        for _ in rest {
-            write!(output, "{}", options.indent_with).unwrap();
-        }
-        write!(output, "'{}'", key_parts.last().expect("must be at least one key part")).unwrap();
-        if let Some(value) = value {
-            write!(output, ": {value}").unwrap();
-        }
-        writeln!(output).unwrap();
-    });
-
-    // TODO: Aggregate counts of subtries.
+        Ok(())
+    }
+    print_tree(&mut output, &count_tree, 0, &options.indent_with)?;
 
 //     let root = trie::Node::from_test_string(r#""foo"
 //   "bar"

@@ -246,17 +246,21 @@ impl<T> Node<T> {
         }
     }
 
+    pub fn value_mut(&mut self) -> Option<&mut T> {
+        match &mut self.data {
+            NodeData::Leaf(value) => Some(value),
+            NodeData::Interior(_) => None,
+        }
+    }
+
+    pub fn key_part(&self) -> &str {
+        &self.key_part
+    }
+
     pub fn children(&self) -> std::slice::Iter<Node<T>> {
         match &self.data {
             NodeData::Leaf(_) => [].iter(),
             NodeData::Interior(children) => children.iter(),
-        }
-    }
-
-    pub fn children_mut(&mut self) -> std::slice::IterMut<Node<T>> {
-        match &mut self.data {
-            NodeData::Leaf(_) => [].iter_mut(),
-            NodeData::Interior(children) => children.iter_mut(),
         }
     }
 

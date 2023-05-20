@@ -32,6 +32,8 @@ fn main() -> anyhow::Result<()> {
     println!("{options:#?}");
 
     // Create empty trie.
+    // TODO: Configure split points, e.g., word based.
+    let mut trie = Trie::new();
     // FIXME
     // let mut trie = if let Some(token) = options.split_delimiter.first() {
     //     Trie::with_split_token(*token)
@@ -46,7 +48,7 @@ fn main() -> anyhow::Result<()> {
         let stdin = Box::leak(Box::new(io::stdin()));
         Box::new(stdin.lock())
     };
-    let mut trie = Trie::new();
+
     for line in input.lines() {
         let line_string = line?;
 

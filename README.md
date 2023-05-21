@@ -12,11 +12,12 @@ Example:
     f
     
     $ tc input.txt
-    3 ab
-      1 c
-      1 d
-      1 e
-    1 f
+    4
+      3 ab
+        1 c
+        1 d
+        1 e
+      1 f
 
 Example for paths:
 
@@ -43,4 +44,4 @@ Advanced example, combining with other UNIX tools, e.g., summing words in a dire
     $ find -type f | xargs wc -w | head -n-1 | tc -c -d'/' -s
     1379 src/
       1337 options.rs
-      42   main.rs
+      42 main.rs

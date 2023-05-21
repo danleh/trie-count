@@ -47,6 +47,10 @@ pub struct Options {
     #[clap(short, long, default_value = "  ", value_name = "STRING", hide_default_value = true)]
     pub indent_with: String,
 
+    /// Quote the strings in the output. [default: false]
+    #[clap(short, long)]
+    pub quote: bool,
+
     /// Do not show subtries below an integer <count> or that account for less than <fraction> of the total count. [default: disabled]
     #[clap(short, long, value_name = "count|fraction")]
     pub min: Option<Threshold>,

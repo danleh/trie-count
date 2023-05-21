@@ -100,7 +100,11 @@ fn main() -> anyhow::Result<()> {
         if options.percent {
             write!(line, "({:.1}%) ", fraction.0 * 100.0)?;
         }
-        write!(line, "'{}'", node.str)?;
+        if options.quote {
+            write!(line, "'{}'", node.str)?;
+        } else {
+            write!(line, "{}", node.str)?;
+        }
         // Put the bar right of the other information and align it.
         if options.bar {
             writeln!(output, "{line:max_width$} {}", unicode_bar(fraction, BAR_WIDTH))?;
@@ -120,7 +124,8 @@ fn main() -> anyhow::Result<()> {
     max_width += total_count.to_string().len() + 1; // Count and space.
     max_width += if options.percent { 8 } else { 0 }; // Percentage, parenthesis etc. and space.
     let max_str_len = count_tree.fold(0, |max_str_len, node| max_str_len.max(node.str.len()));
-    max_width += max_str_len + 2; // String and quotes.
+    max_width += max_str_len;
+    max_width += if options.quote { 2 } else { 0 };
 
     print_tree(&mut output, &count_tree, 0, &options, total_count, max_width)
 }

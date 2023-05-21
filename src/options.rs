@@ -1,5 +1,3 @@
-use std::num::NonZeroU64;
-use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -18,7 +16,7 @@ pub struct Options {
     pub input: Option<PathBuf>,
 
     /// Output file to write the trie to. [default: stdout]
-    #[clap(short, long = "out")]
+    #[clap(short, long = "out", value_hint = ValueHint::FilePath)]
     pub output: Option<PathBuf>,
 
     /// Trim leading and trailing whitespace from each line.
@@ -29,7 +27,7 @@ pub struct Options {
     /// Split only at the given character(s). Can be given multiple times.
     /// For example, -d'/' -d'.' is useful to build a trie of paths, splitting only at directories and file extensions.
     /// [default: split at every character]
-    /// TODO: Make this a regex, not a single character.
+    // TODO: Make this a regex, not a single character.
     #[clap(short = 'd', long, value_name = "CHAR")]
     pub split_delimiter: Vec<char>,
 
@@ -45,15 +43,13 @@ pub struct Options {
     #[clap(short, long, value_name = "c[ount]|a[lpha]")]
     pub sort: Option<SortOrder>,
 
-    /// Character(s) with which to indent levels of the tree. [default: '  ']
-    #[clap(
-        short,
-        long,
-        default_value = "  ",
-        value_name = "STRING",
-        hide_default_value = true
-    )]
+    /// Character(s) with which to indent levels of the tree. [default: "  "]
+    #[clap(short, long, default_value = "  ", value_name = "STRING", hide_default_value = true)]
     pub indent_with: String,
+
+    /// Do not show subtries below an integer <count> or that account for less than <fraction> of the total count. [default: disabled]
+    #[clap(short, long, value_name = "count|fraction")]
+    pub min: Option<Threshold>,
 
     /// Show a percentage next to the count. [default: false]
     #[clap(short, long)]
@@ -62,11 +58,6 @@ pub struct Options {
     /// Show a textual barchart next to the count. [default: false]
     #[clap(short, long)]
     pub bar: bool,
-
-    /// Do not show subtries below an integer COUNT or that account for less than FRACTION of the total count. [default: disabled]
-    /// TODO: Or limit depth of trie.
-    #[clap(short, long, value_name = "COUNT|FRACTION")]
-    pub min: Option<Threshold>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -81,7 +72,7 @@ impl FromStr for SortOrder {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "c" | "count" => Ok(SortOrder::Count),
-            "a" | "alpha" | "alphabetical" => Ok(SortOrder::Alphabetical),
+            "a" | "alpha" => Ok(SortOrder::Alphabetical),
             _ => Err("sort order must be either 'count' or 'alpha'"),
         }
     }
@@ -90,7 +81,7 @@ impl FromStr for SortOrder {
 #[derive(Debug, Clone, Copy)]
 pub enum Threshold {
     Count(u64),
-    Fraction(Fraction),
+    Fraction(ProperFraction),
 }
 
 impl FromStr for Threshold {
@@ -107,31 +98,35 @@ impl FromStr for Threshold {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Fraction(pub f64);
+pub struct ProperFraction(pub f64);
 
-impl FromStr for Fraction {
-    type Err = &'static str;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let fraction = s
-            .parse()
-            .map_err(|_| "fraction must be a decimal value, e.g., 0.1 or .5")?;
-        if !(0.0..1.0).contains(&fraction) {
-            return Err("fraction must be in range [0, 1]");
+impl ProperFraction {
+    pub fn new(nominator: u64, denominator: u64) -> Option<Self> {
+        if nominator > denominator {
+            None
+        } else if denominator == 0 {
+            Some(ProperFraction(1.0))
+        } else {
+            Some(ProperFraction(nominator as f64 / denominator as f64))
         }
-        Ok(Fraction(fraction))
+    }
+
+    pub fn from(f: f64) -> Option<Self> {
+        if !(0.0..1.0).contains(&f) {
+            None
+        } else {
+            Some(ProperFraction(f))
+        }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct CountedLine<'a>(pub u64, pub &'a str);
+impl FromStr for ProperFraction {
+    type Err = &'static str;
 
-impl<'a> CountedLine<'a> {
-    pub fn parse(line: &'a str) -> anyhow::Result<Self> {
-        let (count, line) = line
-            .split_once(char::is_whitespace)
-            .ok_or(anyhow::Error::msg("could not split count from rest of line"))?;
-        let count: u64 = count.parse()?;
-        Ok(CountedLine(count, line))
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let fraction: f64 = s
+            .parse()
+            .map_err(|_| "fraction must be a decimal value, e.g., 0.1 or .5")?;
+        ProperFraction::from(fraction).ok_or("fraction must be in range [0, 1]")
     }
 }

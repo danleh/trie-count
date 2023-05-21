@@ -8,30 +8,30 @@
 
 // #[global_allocator]
 // static GLOBAL: MiMalloc = MiMalloc;
-
+use std::fmt::Write;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter};
 
 use anyhow::Context;
 use clap::Parser;
 
-use crate::options::{CountedLine, Options, Threshold};
+use crate::options::{Options, ProperFraction, Threshold};
 use crate::trie::Trie;
+use crate::unicode_bar::unicode_bar;
 
 mod options;
-mod unicode_bar_chart;
+mod unicode_bar;
 
 mod count_tree;
 
 pub mod trie;
 
 const BAR_WIDTH: usize = 20;
-const TARGET_MAX_LINE_WIDTH: usize = 100;
 
 fn main() -> anyhow::Result<()> {
     let options = options::Options::parse();
     // DEBUG
-    println!("{options:#?}");
+    eprintln!("{options:#?}");
 
     // Create empty trie.
     // TODO: Configure split points, e.g., word based.
@@ -77,8 +77,8 @@ fn main() -> anyhow::Result<()> {
 
     // Optionally sort by subtree sizes.
     match options.sort {
-        Some(options::SortOrder::Count) => count_tree.sort_by_count_desc(),
-        Some(options::SortOrder::Alphabetical) => count_tree.sort_by_str(),
+        Some(options::SortOrder::Count) => count_tree.sort_by_key(|node| std::cmp::Reverse(node.count)),
+        Some(options::SortOrder::Alphabetical) => count_tree.sort_by_key(|node| node.str),
         None => {}
     };
 
@@ -89,96 +89,63 @@ fn main() -> anyhow::Result<()> {
         Box::new(io::stdout())
     };
 
-    // let max_size_width = trie.len().to_string().len();
-    // let total_inv = 1.0 / trie.len() as f64;
-
-    // for (prefix, level, count) in trie.by_levels_with_count() {
-    //     let indent = options.indent_with.repeat(level);
-    //     let line = format!("{indent}{count:<max_size_width$} {prefix}");
-    //     if options.bar {
-    //         let total_fraction = count as f64 * total_inv;
-    //         let bar = unicode_bar_chart::unicode_bar_str(total_fraction, BAR_WIDTH);
-    //         // Put bar right of the other information and align such that total width is not exceeded.
-    //         writeln!(output, "{:width$}{}", line, bar, width = TARGET_MAX_LINE_WIDTH - BAR_WIDTH)?;
-    //     } else {
-    //         writeln!(output, "{line}")?;
-    //     }
-    // }
-
-    // trie.root.internal_iter_items(|key_parts, value| {
-    //     let (first, rest) = key_parts.split_first().expect("must be at least one key part");
-    //     if !first.is_empty() {
-    //         write!(output, "{}", options.indent_with).unwrap();
-    //     }
-    //     for _ in rest {
-    //         write!(output, "{}", options.indent_with).unwrap();
-    //     }
-    //     write!(output, "'{}'", key_parts.last().expect("must be at least one key part")).unwrap();
-    //     if let Some(value) = value {
-    //         write!(output, ": {value}").unwrap();
-    //     }
-    //     writeln!(output).unwrap();
-    // });
-
     fn print_tree(
         output: &mut impl io::Write,
         node: &count_tree::Node,
         level: usize,
         options: &Options,
         total_count: u64,
-    ) -> io::Result<()> {
-        let fraction = if total_count == 0 {
-            1.0
-        } else {
-            node.count as f64 / total_count as f64
-        };
+        max_width: usize,
+    ) -> anyhow::Result<()> {
+        // Filter out nodes that are below the threshold.
+        let fraction = ProperFraction::new(node.count, total_count).unwrap();
         match options.min {
             Some(Threshold::Count(threshold)) if node.count < threshold => return Ok(()),
-            Some(Threshold::Fraction(threshold)) if fraction < threshold.0 => return Ok(()),
-            _ => {},
+            Some(Threshold::Fraction(threshold)) if fraction < threshold => return Ok(()),
+            _ => {}
         }
 
-        write!(output, "{}", options.indent_with.repeat(level))?;
-        write!(output, "{} ", node.count)?;
+        let mut before_bar = options.indent_with.repeat(level);
+        write!(before_bar, "{} ", node.count)?;
         if options.percent {
-            write!(output, "({:.1}%) ", fraction * 100.0)?;
+            write!(before_bar, "({:.1}%) ", fraction.0 * 100.0)?;
         }
-        writeln!(output, "'{}'", node.str)?;
+        write!(before_bar, "'{}'", node.str)?;
+        // Put the bar right of the other information and align it.
+        if options.bar {
+            writeln!(output, "{before_bar:max_width$} {}", unicode_bar(fraction, BAR_WIDTH))?;
+        } else {
+            writeln!(output, "{before_bar}")?;
+        }
+
         for child in node.children.iter() {
-            print_tree(output, child, level + 1, options, total_count)?;
+            print_tree(output, child, level + 1, options, total_count, max_width)?;
         }
         Ok(())
     }
-    print_tree(&mut output, &count_tree, 0, &options, count_tree.count)?;
 
-    //     let root = trie::Node::from_test_string(r#""foo"
-    //   "bar"
-    //     "":0
-    //     "qux":1
-    //   "qux":2
-    //   "":3"#);
-    //     let sum = test_internal_iter_values(&root);
-    //     println!("{sum}");
+    let total_count = count_tree.count;
 
-    //     let sum2 = test_external_iter_values(&root);
-    //     println!("{sum2}");
+    // Calculate maximum width of a line for indentation of the bar chart.
+    let mut max_width = 0;
+    max_width += count_tree.height() * options.indent_with.len();  // Indentation.
+    max_width += total_count.to_string().len() + 1;  // Count and space.
+    max_width += if options.percent { 8 } else { 0 };  // Percentage, parenthesis etc. and space.
+    let max_str_len = count_tree.fold(0, |max_str_len, node| max_str_len.max(node.str.len()));
+    max_width += max_str_len + 2;  // String and quotes.
 
-    Ok(())
+    print_tree(&mut output, &count_tree, 0, &options, total_count, max_width)
 }
 
-#[inline(never)]
-fn test_internal_iter_values(root: &trie::Node<i32>) -> i32 {
-    let mut sum = 0;
-    root.internal_iter_values(|_value| sum += 17);
-    sum
-}
+#[derive(Debug, Clone)]
+pub struct CountedLine<'a>(pub u64, pub &'a str);
 
-#[inline(never)]
-fn test_external_iter_values(root: &trie::Node<i32>) -> i32 {
-    let mut sum = 0;
-    let mut iter = root.external_iter_values();
-    while let Some((_key, _value)) = iter.next() {
-        sum += 17;
+impl<'a> CountedLine<'a> {
+    pub fn parse(line: &'a str) -> anyhow::Result<Self> {
+        let (count, line) = line
+            .split_once(char::is_whitespace)
+            .ok_or(anyhow::Error::msg("could not split count from rest of line"))?;
+        let count: u64 = count.parse()?;
+        Ok(CountedLine(count, line))
     }
-    sum
 }

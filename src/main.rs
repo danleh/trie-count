@@ -7,6 +7,7 @@ use std::io::{self, BufRead, BufReader, BufWriter};
 use anyhow::Context;
 use clap::Parser;
 
+use crate::longest_common_prefix::split_at_all_chars;
 use crate::options::{Options, ProperFraction, Threshold};
 use crate::trie::Trie;
 use crate::unicode_bar::unicode_bar;
@@ -23,13 +24,24 @@ fn main() -> anyhow::Result<()> {
     let options = options::Options::parse();
     // DEBUG
     eprintln!("{options:#?}");
-
-    fn monomorphize_trie_splitter<'a, F, I>(key_splitter: F, options: &Options) -> anyhow::Result<()>
+    
+    // Create empty trie.
+    // Use provided delimiter pattern to split lines into parts.
+    // Since the splitter closure is part of the type of the trie, we must unfortunately
+    // explicitly pull it out into a separate generic function that is then monomorphized for each
+    // of the two possible types of splitters.
+    if let Some(regex) = &options.split_delimiter {
+        let regex = regex.clone();
+        monomorphize_trie_splitter(|str: &str| str.split_inclusive(&regex), &options)?;
+    } else {
+        monomorphize_trie_splitter(split_at_all_chars, &options)?;
+    }
+    fn monomorphize_trie_splitter<'a, F, I>(split_inclusive: F, options: &Options) -> anyhow::Result<()>
     where
         F: Fn(&'a str) -> I,
         I: Iterator<Item = &'a str>,
     {
-        let mut trie = Trie::with_key_splitter(key_splitter);
+        let mut trie = Trie::with_key_splitter(split_inclusive);
 
         // Read lines from input and insert intro trie.
         let input: Box<dyn io::BufRead> = if let Some(file) = &options.input {
@@ -127,21 +139,10 @@ fn main() -> anyhow::Result<()> {
         max_width += max_str_len;
         max_width += if options.quote { 2 } else { 0 };
 
-        print_tree(&mut output, &count_tree, 0, &options, total_count, max_width)
-    }
-    
-    // Create empty trie.
-    // Use provided delimiter pattern to split lines into parts.
-    if let Some(regex) = &options.split_delimiter {
-        let regex = regex.clone();
-        monomorphize_trie_splitter(|str: &str| {
-            // str.matches(regex)
-            str.split_inclusive(" ")
-        }, &options)
-    } else {
-        monomorphize_trie_splitter(chars, &options)
+        print_tree(&mut output, &count_tree, 0, options, total_count, max_width)
     }
 
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -157,31 +158,4 @@ impl<'a> CountedLine<'a> {
         let count: u64 = count.parse()?;
         Ok(CountedLine(count, line))
     }
-}
-
-// FIXME Remove
-pub fn chars(s: &str) -> impl Iterator<Item = &str> {
-    let mut chars = s
-        .char_indices()
-        .map(|(i, _c)| i)
-        .chain(std::iter::once(s.len()));
-    let mut begin = chars.next().unwrap();
-    std::iter::from_fn(move || {
-        if let Some(index) = chars.next() {
-            let chars = unsafe { s.get_unchecked(begin..index) };
-            begin = index;
-            Some(chars)
-        } else {
-            None
-        }
-    })
-}
-
-#[test]
-fn test_chars() {
-    let mut chars = chars("foo");
-    assert_eq!(chars.next(), Some("f"));
-    assert_eq!(chars.next(), Some("o"));
-    assert_eq!(chars.next(), Some("o"));
-    assert_eq!(chars.next(), None);
 }

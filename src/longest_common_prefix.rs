@@ -1,4 +1,3 @@
-
 #[derive(Debug, PartialEq, Eq)]
 pub struct LcpResult<'a> {
     pub common_prefix: &'a str,
@@ -14,13 +13,16 @@ where
     let left_iter = split_inclusive(left);
     let right_iter = split_inclusive(right);
 
-    let (mut left_last, mut right_last) = (left.as_ptr(), right.as_ptr());
     let mut difference_start_index = 0;
+
+    let mut left_last = left.as_ptr();
+    let mut right_last = right.as_ptr();
     for (left_part, right_part) in left_iter.zip(right_iter) {
+        // Check that the split iterator decomposes the input without losing any parts.
         debug_assert_eq!(left_last, left_part.as_ptr());
         debug_assert_eq!(right_last, right_part.as_ptr());
-        left_last = unsafe { left_last.add(left_part.len()) };
-        right_last = unsafe { right_last.add(right_part.len()) };
+        left_last = left_part.as_bytes().as_ptr_range().end;
+        right_last = right_part.as_bytes().as_ptr_range().end;
 
         if left_part != right_part {
             break;
@@ -35,68 +37,54 @@ where
     }
 }
 
-// pub fn chars(s: &str) -> impl Iterator<Item = usize> + '_ {
-//     s.char_indices().map(|(i, _c)| i)
-// }
-
-// pub fn graphemes(s: &str) -> impl Iterator<Item = usize> +'_ {
-//     use unicode_segmentation::UnicodeSegmentation;
-//     s.grapheme_indices(true).map(|(i, _c)| i)
-// }
-
-// #[inline(never)]
-// pub fn check_asm<'a>(a: &'a str, b: &'a str) -> LcpResult<'a> {
-//     longest_common_prefix(a, b, chars)
-// }
-
-// pub fn chars(s: char) -> bool { true }
-// pub fn graphemes()
-
-pub fn chars(s: &str) -> impl Iterator<Item = &str> {
+pub fn split_at_all_chars(s: &str) -> impl Iterator<Item = &str> {
     s.split_inclusive(|_| true)
 }
 
-pub fn graphemes(s: &str) -> impl Iterator<Item = &str> {
-    use unicode_segmentation::UnicodeSegmentation;
-    s.graphemes(true)
-}
-
 #[test]
-fn test() {
-    let result = longest_common_prefix("", "", chars);
+fn test_ascii() {
+    let result = longest_common_prefix("", "", split_at_all_chars);
     assert_eq!(result, LcpResult {
         common_prefix: "",
         left_rest: "",
         right_rest: "",
     }, "empty strings");
 
-    let result = longest_common_prefix("foo", "foo", chars);
+    let result = longest_common_prefix("foo", "foo", split_at_all_chars);
     assert_eq!(result, LcpResult {
         common_prefix: "foo",
         left_rest: "",
         right_rest: "",
     }, "equal strings");
 
-    let result = longest_common_prefix("foo", "foobar", chars);
+    let result = longest_common_prefix("foo", "foobar", split_at_all_chars);
     assert_eq!(result, LcpResult {
         common_prefix: "foo",
         left_rest: "",
         right_rest: "bar",
     }, "left is prefix of right");
 
-    let result = longest_common_prefix("foobar", "foo", chars);
+    let result = longest_common_prefix("foobar", "foo", split_at_all_chars);
     assert_eq!(result, LcpResult {
         common_prefix: "foo",
         left_rest: "bar",
         right_rest: "",
     }, "right is prefix of left");
 
-    let result = longest_common_prefix("foo", "bar", chars);
+    let result = longest_common_prefix("foo", "bar", split_at_all_chars);
     assert_eq!(result, LcpResult {
         common_prefix: "",
         left_rest: "foo",
         right_rest: "bar",
     }, "no common prefix");
+}
+
+#[test]
+fn test_unicode() {
+    fn graphemes(s: &str) -> impl Iterator<Item = &str> {
+        use unicode_segmentation::UnicodeSegmentation;
+        s.graphemes(true)
+    }
 
     let result = longest_common_prefix("foo", "föö", graphemes);
     assert_eq!(result, LcpResult {
@@ -112,8 +100,11 @@ fn test() {
         right_rest: "🇪🇺",
     }, "unicode country flags");
 
-    // TODO: unicode tests: smileys, German umlauts, etc.
+    // TODO: smileys, German umlauts, etc.
+}
 
+#[test]
+fn test_custom_splitters() {
     let result = longest_common_prefix("foo bar", "foo baz", |s| s.split_inclusive(' '));
     assert_eq!(result, LcpResult {
         common_prefix: "foo ",
@@ -127,5 +118,4 @@ fn test() {
         left_rest: "don't split inside words",
         right_rest: "do not split inside words",
     }, "split on space");
-
 }

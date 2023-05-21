@@ -402,12 +402,12 @@ impl<T> Node<T> {
                         return Some((key_matched_len, cur_node))
                     },
                 NodeData::Interior(children) =>
-                    match split_prefix_rest(key_query, &cur_node.key_part, str::char_indices) {
+                    match longest_common_prefix(key_query, &cur_node.key_part, str::char_indices) {
                         // The queried key was fully a prefix of the current node, so return the whole subtrie.
-                        SplitResult { common_prefix: _, left_rest: "", right_rest: _ } =>
+                        LcpResult { common_prefix: _, left_rest: "", right_rest: _ } =>
                             return Some((key_matched_len, cur_node)),
                         // The current node "consumed" a prefix of the queried key, so search further in the children.
-                        SplitResult { common_prefix, left_rest: key_query, right_rest: "" } =>
+                        LcpResult { common_prefix, left_rest: key_query, right_rest: "" } =>
                             for child in children {
                                 if let Some((key_matched_len, node)) = get_all_with_prefix(child, key_query, key_matched_len + common_prefix.len()) {
                                     return Some((key_matched_len, node));
@@ -415,7 +415,7 @@ impl<T> Node<T> {
                             },
                         // Both have a non-empty rest after splitting off the `common_prefix`, 
                         // so neither was a prefix of the other, hence stop the search.
-                        SplitResult { .. } => return None
+                        LcpResult { .. } => return None
                     }
             }
             None
@@ -437,18 +437,18 @@ impl<T> Node<T> {
 
     // TODO: Replace with `entry` API, using `Entry` and `InsertAction`.
     pub fn insert_or_update<const IS_ROOT: bool, U>(&mut self, insert_key: &str, insert_value: T, update: &impl Fn(&mut T) -> U) -> InsertOrUpdateResult<T, U> {
-        let split_result = split_prefix_rest(insert_key, &self.key_part, str::char_indices);
+        let split_result = longest_common_prefix(insert_key, &self.key_part, str::char_indices);
         match (&mut self.data, split_result) {
             // This is a leaf and its key is exactly equal to the insertion key.
             // -> Replace the value.
-            (NodeData::Leaf(value), SplitResult { common_prefix: _, left_rest: "", right_rest: "" }) => {
+            (NodeData::Leaf(value), LcpResult { common_prefix: _, left_rest: "", right_rest: "" }) => {
                 let result = update(value);
                 InsertOrUpdateResult::Updated { result }
             }
 
             // This is the "initial" empty root (an interior node with an empty key and no children).
             // -> Replace with a single new leaf.
-            (NodeData::Interior(children), SplitResult { common_prefix, left_rest: insert_key, right_rest }) if IS_ROOT && children.is_empty() => {
+            (NodeData::Interior(children), LcpResult { common_prefix, left_rest: insert_key, right_rest }) if IS_ROOT && children.is_empty() => {
                 debug_assert!(common_prefix.is_empty());
                 debug_assert!(right_rest.is_empty());
 
@@ -458,7 +458,7 @@ impl<T> Node<T> {
 
             // This is an interior node and its key is a prefix of the `insert_key`.
             // -> This is the right subtrie to (recursively) try to insert.
-            (NodeData::Interior(children), SplitResult { common_prefix: _stripped, left_rest: insert_key_rest, right_rest: "" }) => {
+            (NodeData::Interior(children), LcpResult { common_prefix: _stripped, left_rest: insert_key_rest, right_rest: "" }) => {
                 // Try to insert into the children.
                 let mut insert_value = insert_value;
                 for child in children.iter_mut() {
@@ -482,14 +482,14 @@ impl<T> Node<T> {
             // The root node is allowed to have an empty key (in case there is no common prefix
             // among all strings in the trie). In this case, we fall through to the next match arm
             // which will split the root into a new root with an empty key.
-            (_, SplitResult { common_prefix: "", left_rest: _insert_key, right_rest: _self_key }) if !IS_ROOT => {
+            (_, LcpResult { common_prefix: "", left_rest: _insert_key, right_rest: _self_key }) if !IS_ROOT => {
                 InsertOrUpdateResult::NoPrefix { value: insert_value }
             }
 
             // General case: The insertion key and the current node's key have a non-empty common prefix.
             // -> Split this node into an interior node with the common prefix as key,
             // and two leaf nodes as children, one for the old self's subtrie and one for the newly inserted value.
-            (_, SplitResult { common_prefix, left_rest: insert_key_rest, right_rest: self_key_rest }) => {
+            (_, LcpResult { common_prefix, left_rest: insert_key_rest, right_rest: self_key_rest }) => {
                 let new_leaf = Node::leaf(insert_key_rest, insert_value);
                 let new_interior = Node::interior(common_prefix, Vec::with_capacity(2));
                 self.key_part = self_key_rest.into();
@@ -741,7 +741,7 @@ impl<T> Node<T> {
             }
             for (i, child1) in children.iter().enumerate() {
                 for child2 in &children[i+1..] {
-                    let split_result = split_prefix_rest(&child1.key_part, &child2.key_part, str::char_indices);
+                    let split_result = longest_common_prefix(&child1.key_part, &child2.key_part, str::char_indices);
                     assert!(split_result.common_prefix.is_empty(), "invariant violated: children of interior nodes must not have a common prefix\n{self:?}");
                 }
             }
@@ -753,13 +753,13 @@ impl<T> Node<T> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct SplitResult<'a> {
+struct LcpResult<'a> {
     common_prefix: &'a str,
     left_rest: &'a str,
     right_rest: &'a str,
 }
 
-fn split_prefix_rest<'a, F, I, P>(left: &'a str, right: &'a str, split_points: F) -> SplitResult<'a>
+fn longest_common_prefix<'a, F, I, P>(left: &'a str, right: &'a str, split_points: F) -> LcpResult<'a>
 where
     F: Fn(&'a str) -> I,
     I: Iterator<Item = (usize, P)>,
@@ -784,7 +784,7 @@ where
     debug_assert_eq!(common_prefix_left, common_prefix_right);
     let common_prefix = common_prefix_left;
 
-    SplitResult { common_prefix, left_rest, right_rest }
+    LcpResult { common_prefix, left_rest, right_rest }
 }
 
 /// ASCII Art of this trie:
@@ -898,50 +898,50 @@ mod test {
 
     #[test]
     fn test_split_prefix_rest() {
-        let result = split_prefix_rest("", "", str::char_indices);
-        assert_eq!(result, SplitResult {
+        let result = longest_common_prefix("", "", str::char_indices);
+        assert_eq!(result, LcpResult {
             common_prefix: "",
             left_rest: "",
             right_rest: "",
         }, "empty strings");
 
-        let result = split_prefix_rest("foo", "foo", str::char_indices);
-        assert_eq!(result, SplitResult {
+        let result = longest_common_prefix("foo", "foo", str::char_indices);
+        assert_eq!(result, LcpResult {
             common_prefix: "foo",
             left_rest: "",
             right_rest: "",
         }, "equal strings");
 
-        let result = split_prefix_rest("foo", "foobar", str::char_indices);
-        assert_eq!(result, SplitResult {
+        let result = longest_common_prefix("foo", "foobar", str::char_indices);
+        assert_eq!(result, LcpResult {
             common_prefix: "foo",
             left_rest: "",
             right_rest: "bar",
         }, "left is prefix of right");
 
-        let result = split_prefix_rest("foobar", "foo", str::char_indices);
-        assert_eq!(result, SplitResult {
+        let result = longest_common_prefix("foobar", "foo", str::char_indices);
+        assert_eq!(result, LcpResult {
             common_prefix: "foo",
             left_rest: "bar",
             right_rest: "",
         }, "right is prefix of left");
 
-        let result = split_prefix_rest("foo", "bar", str::char_indices);
-        assert_eq!(result, SplitResult {
+        let result = longest_common_prefix("foo", "bar", str::char_indices);
+        assert_eq!(result, LcpResult {
             common_prefix: "",
             left_rest: "foo",
             right_rest: "bar",
         }, "no common prefix");
 
-        let result = split_prefix_rest("foo", "föö", |s| s.grapheme_indices(true));
-        assert_eq!(result, SplitResult {
+        let result = longest_common_prefix("foo", "föö", |s| s.grapheme_indices(true));
+        assert_eq!(result, LcpResult {
             common_prefix: "f",
             left_rest: "oo",
             right_rest: "öö",
         }, "unicode umlauts");
 
-        let result = split_prefix_rest("🇩🇪", "🇩🇪🇪🇺", |s| s.grapheme_indices(true));
-        assert_eq!(result, SplitResult {
+        let result = longest_common_prefix("🇩🇪", "🇩🇪🇪🇺", |s| s.grapheme_indices(true));
+        assert_eq!(result, LcpResult {
             common_prefix: "🇩🇪",
             left_rest: "",
             right_rest: "🇪🇺",

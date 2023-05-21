@@ -5,10 +5,10 @@ pub struct LcpResult<'a> {
     pub right_rest: &'a str,
 }
 
-pub fn longest_common_prefix<'a, F, I>(left: &'a str, right: &'a str, split_inclusive: F) -> LcpResult<'a>
+pub fn longest_common_prefix<'a, 'b, F, I>(left: &'a str, right: &'a str, split_inclusive: F) -> LcpResult<'a>
 where
-    F: Fn(&'a str) -> I,
-    I: Iterator<Item = &'a str>,
+    F: Fn(&'_ str) -> I + 'b,
+    I: Iterator<Item = &'b str>,
 {
     let left_iter = split_inclusive(left);
     let right_iter = split_inclusive(right);
@@ -37,7 +37,7 @@ where
     }
 }
 
-pub fn split_at_all_chars(s: &str) -> impl Iterator<Item = &str> {
+pub fn split_at_all_chars(s: &str) -> impl Iterator<Item = &str> + '_ {
     s.split_inclusive(|_| true)
 }
 

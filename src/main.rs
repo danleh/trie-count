@@ -38,7 +38,7 @@ fn main() -> anyhow::Result<()> {
     }
     fn monomorphize_trie_splitter<'a, F, I>(split_inclusive: F, options: &Options) -> anyhow::Result<()>
     where
-        F: Fn(&'a str) -> I,
+        F: Fn(&'_ str) -> I,
         I: Iterator<Item = &'a str>,
     {
         let mut trie = Trie::with_key_splitter(split_inclusive);

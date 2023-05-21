@@ -121,3 +121,16 @@ impl FromStr for Fraction {
         Ok(Fraction(fraction))
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct CountedLine<'a>(pub u64, pub &'a str);
+
+impl<'a> CountedLine<'a> {
+    pub fn parse(line: &'a str) -> anyhow::Result<Self> {
+        let (count, line) = line
+            .split_once(char::is_whitespace)
+            .ok_or(anyhow::Error::msg("could not split count from rest of line"))?;
+        let count: u64 = count.parse()?;
+        Ok(CountedLine(count, line))
+    }
+}

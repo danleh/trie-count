@@ -12,8 +12,10 @@
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter};
 
+use anyhow::Context;
 use clap::Parser;
 
+use crate::options::CountedLine;
 use crate::trie::Trie;
 
 mod options;
@@ -29,7 +31,7 @@ const TARGET_MAX_LINE_WIDTH: usize = 100;
 fn main() -> anyhow::Result<()> {
     let options = options::Options::parse();
     // DEBUG
-    println!("{options:#?}");
+    // println!("{options:#?}");
 
     // Create empty trie.
     // TODO: Configure split points, e.g., word based.
@@ -49,30 +51,20 @@ fn main() -> anyhow::Result<()> {
         Box::new(stdin.lock())
     };
 
-    for line in input.lines() {
-        let line_string = line?;
+    for (i, line) in input.lines().enumerate() {
+        let line = line?;
+        let mut line = line.as_str();
 
-        let mut line = line_string.as_str();
+        // Optionally trim leading and trailing whitespace.
         if options.trim_input {
             line = line.trim();
         }
 
-        struct CountedLine<'a>(u64, &'a str);
-        impl<'a> TryFrom<&'a str> for CountedLine<'a> {
-            type Error;
-            fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        todo!()
-    }
-        }
-
-        let (count, line) = if options.counted_input {
-            // split line once into count and rest of line.
-            // FIXME: Make this more robust: better error report with input line and line number, if count is not a number or if it doesn't match the pattern
-            let (count, rest) = line.split_once(|c: char| c.is_whitespace()).expect("line must begin with count, followed by whitespace");
-            let count: u64 = count.parse()?;
-            (count, rest)
+        // Optionally use counts from beginning of line.
+        let CountedLine(count, line) = if options.counted_input {
+            CountedLine::parse(line).with_context(|| format!("input line {}: expected integer count, got '{line}'", i+1))?
         } else {
-            (1, line)
+            CountedLine(1, line)
         };
 
         trie.insert_or_update(line, count, |current| *current += count);

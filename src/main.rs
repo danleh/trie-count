@@ -15,7 +15,7 @@ use std::io::{self, BufRead, BufReader, BufWriter};
 use anyhow::Context;
 use clap::Parser;
 
-use crate::options::CountedLine;
+use crate::options::{CountedLine, Options, Threshold};
 use crate::trie::Trie;
 
 mod options;
@@ -31,7 +31,7 @@ const TARGET_MAX_LINE_WIDTH: usize = 100;
 fn main() -> anyhow::Result<()> {
     let options = options::Options::parse();
     // DEBUG
-    // println!("{options:#?}");
+    println!("{options:#?}");
 
     // Create empty trie.
     // TODO: Configure split points, e.g., word based.
@@ -44,7 +44,7 @@ fn main() -> anyhow::Result<()> {
     // };
 
     // Read lines from input and insert intro trie.
-    let input: Box<dyn io::BufRead> = if let Some(file) = options.input {
+    let input: Box<dyn io::BufRead> = if let Some(file) = &options.input {
         Box::new(BufReader::new(File::open(file)?))
     } else {
         let stdin = Box::leak(Box::new(io::stdin()));
@@ -62,7 +62,9 @@ fn main() -> anyhow::Result<()> {
 
         // Optionally use counts from beginning of line.
         let CountedLine(count, line) = if options.counted_input {
-            CountedLine::parse(line).with_context(|| format!("input line {}: expected integer count, got '{line}'", i+1))?
+            CountedLine::parse(line).with_context(|| {
+                format!("input line {}: expected integer count, got '{line}'", i + 1)
+            })?
         } else {
             CountedLine(1, line)
         };
@@ -81,7 +83,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     // Write trie to output.
-    let mut output: Box<dyn io::Write> = if let Some(file) = options.output {
+    let mut output: Box<dyn io::Write> = if let Some(file) = &options.output {
         Box::new(BufWriter::new(File::create(file)?))
     } else {
         Box::new(io::stdout())
@@ -118,27 +120,48 @@ fn main() -> anyhow::Result<()> {
     //     writeln!(output).unwrap();
     // });
 
-    fn print_tree(output: &mut impl io::Write, node: &count_tree::Node, level: usize, indent_with: &str) -> io::Result<()> {
-        write!(output, "{}", indent_with.repeat(level))?;
-        writeln!(output, "{} '{}'", node.count, node.str)?;
+    fn print_tree(
+        output: &mut impl io::Write,
+        node: &count_tree::Node,
+        level: usize,
+        options: &Options,
+        total_count: u64,
+    ) -> io::Result<()> {
+        let fraction = if total_count == 0 {
+            1.0
+        } else {
+            node.count as f64 / total_count as f64
+        };
+        match options.min {
+            Some(Threshold::Count(threshold)) if node.count < threshold => return Ok(()),
+            Some(Threshold::Fraction(threshold)) if fraction < threshold.0 => return Ok(()),
+            _ => {},
+        }
+
+        write!(output, "{}", options.indent_with.repeat(level))?;
+        write!(output, "{} ", node.count)?;
+        if options.percent {
+            write!(output, "({:.1}%) ", fraction * 100.0)?;
+        }
+        writeln!(output, "'{}'", node.str)?;
         for child in node.children.iter() {
-            print_tree(output, child, level + 1, indent_with)?;
+            print_tree(output, child, level + 1, options, total_count)?;
         }
         Ok(())
     }
-    print_tree(&mut output, &count_tree, 0, &options.indent_with)?;
+    print_tree(&mut output, &count_tree, 0, &options, count_tree.count)?;
 
-//     let root = trie::Node::from_test_string(r#""foo"
-//   "bar"
-//     "":0
-//     "qux":1
-//   "qux":2
-//   "":3"#);
-//     let sum = test_internal_iter_values(&root);
-//     println!("{sum}");
+    //     let root = trie::Node::from_test_string(r#""foo"
+    //   "bar"
+    //     "":0
+    //     "qux":1
+    //   "qux":2
+    //   "":3"#);
+    //     let sum = test_internal_iter_values(&root);
+    //     println!("{sum}");
 
-//     let sum2 = test_external_iter_values(&root);
-//     println!("{sum2}");
+    //     let sum2 = test_external_iter_values(&root);
+    //     println!("{sum2}");
 
     Ok(())
 }

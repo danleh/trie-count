@@ -1,3 +1,4 @@
+use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -88,7 +89,7 @@ impl FromStr for SortOrder {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Threshold {
-    Count(NonZeroUsize),
+    Count(u64),
     Fraction(Fraction),
 }
 
@@ -106,7 +107,7 @@ impl FromStr for Threshold {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Fraction(f32);
+pub struct Fraction(pub f64);
 
 impl FromStr for Fraction {
     type Err = &'static str;

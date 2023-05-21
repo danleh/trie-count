@@ -13,6 +13,7 @@ path = "src/main.rs"
 clap = { version = "4.1.8", features = ["derive", "cargo"] }
 anyhow = "1.0.69"
 unicode-segmentation = "1.10.1"
+regex = {version = "1.8.1", features = ["pattern"] }
 
 [dev-dependencies]
 rand = "0.8.5"

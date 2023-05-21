@@ -9,8 +9,8 @@ pub struct Node<'a> {
     pub children: Vec<Node<'a>>,
 }
 
-impl<'a> From<&'a Trie<u64>> for Node<'a> {
-    fn from(trie: &'a Trie<u64>) -> Self {
+impl<'a, F> From<&'a Trie<u64, F>> for Node<'a> {
+    fn from(trie: &'a Trie<u64, F>) -> Self {
         fn from(trie_node: &trie::Node<u64>) -> Node {
             let mut count = trie_node.value().copied().unwrap_or(0);
             let mut children = Vec::new();

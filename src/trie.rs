@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 
 // see https://github.com/michaelsproul/rust_radix_trie/blob/master/examples/string_frequency.rs
 // and https://github.com/miedzinski/prefix-tree
@@ -10,21 +11,19 @@ use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
 // TODO: generalize over generic sequences of K (e.g., bytes) instead of just `&str`.
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Trie<T, /*F*/> {
+pub struct Trie<T, F> {
     // FIXME: Hide this better, provide iterator accessors
     pub(crate) root: Node<T>,
 
-    // /// Determines at which points the key string may be split, e.g., only at '/', only at 
-    // /// unicode grapheme cluster boundaries, or at any character boundary.
-    // key_split_points: F,
+    /// Splits the key string, e.g., only at '/', only at unicode grapheme cluster boundaries, or at
+    /// any character.
+    key_splitter: F,
 }
 
-impl<T, 
-// F, I, P
-> Trie<T, /*F*/>
-// where
-//     F: Fn(&str) -> I,
-//     I: Iterator<Item = (usize, P)>,
+impl<T, F> Trie<T, F>
+where
+    // F: Fn(&'a str) -> I,
+    // I: Iterator<Item = &'a str>,
 //     P: PartialEq
 {
     // pub fn new(key_split_points: F) -> Self {
@@ -34,9 +33,14 @@ impl<T,
     //     }
     // }
 
-    pub fn new() -> Self {
+    pub fn with_key_splitter<'a, I>(key_splitter: F) -> Self
+    where
+        F: Fn(&'a str) -> I,
+        I: Iterator<Item = &'a str>,
+    {   
         Self {
             root: Node::empty_root(),
+            key_splitter,
         }
     }
 

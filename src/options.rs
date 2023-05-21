@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use clap::Parser;
 use clap::ValueHint;
+use regex::Regex;
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -16,7 +17,7 @@ pub struct Options {
     pub input: Option<PathBuf>,
 
     /// Output file to write the trie to. [default: stdout]
-    #[clap(short, long = "out", value_hint = ValueHint::FilePath)]
+    #[clap(short, long = "out", value_name = "file", value_hint = ValueHint::FilePath)]
     pub output: Option<PathBuf>,
 
     /// Trim leading and trailing whitespace from each line.
@@ -24,12 +25,13 @@ pub struct Options {
     #[clap(short, long)]
     pub trim_input: bool,
 
-    /// Split only at the given character(s). Can be given multiple times.
-    /// For example, -d'/' -d'.' is useful to build a trie of paths, splitting only at directories and file extensions.
+    /// Split only at the given regex pattern.
+    /// For example, -d'/|\.' is useful to build a trie of paths, splitting only at directories and file extensions.
     /// [default: split at every character]
-    // TODO: Make this a regex, not a single character.
-    #[clap(short = 'd', long, value_name = "CHAR")]
-    pub split_delimiter: Vec<char>,
+    #[clap(short = 'd', long, value_name = "regex")]
+    pub split_delimiter: Option<Regex>,
+
+    // TODO: Option to remove the split delimiter from the output.
 
     /// Each input line starts with a count of how often to count the following string.
     /// Example: "42 foo" counts the string "foo" 42 times.
@@ -44,7 +46,7 @@ pub struct Options {
     pub sort: Option<SortOrder>,
 
     /// Character(s) with which to indent levels of the tree. [default: "  "]
-    #[clap(short, long, default_value = "  ", value_name = "STRING", hide_default_value = true)]
+    #[clap(short, long, default_value = "  ", value_name = "string", hide_default_value = true)]
     pub indent_with: String,
 
     /// Quote the strings in the output. [default: false]

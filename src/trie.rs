@@ -6,7 +6,7 @@
 
 use std::{str::FromStr, marker::PhantomData, iter::Sum, borrow::Borrow};
 
-use crate::longest_common_prefix::{longest_common_prefix, LcpResult};
+use crate::longest_common_prefix::{longest_common_prefix, LcpResult, chars};
 
 // TODO: generalize over generic sequences of K (e.g., bytes) instead of just `&str`.
 
@@ -402,7 +402,7 @@ impl<T> Node<T> {
                         return Some((key_matched_len, cur_node))
                     },
                 NodeData::Interior(children) =>
-                    match longest_common_prefix(key_query, &cur_node.key_part, str::char_indices) {
+                    match longest_common_prefix(key_query, &cur_node.key_part, chars) {
                         // The queried key was fully a prefix of the current node, so return the whole subtrie.
                         LcpResult { common_prefix: _, left_rest: "", right_rest: _ } =>
                             return Some((key_matched_len, cur_node)),
@@ -437,7 +437,7 @@ impl<T> Node<T> {
 
     // TODO: Replace with `entry` API, using `Entry` and `InsertAction`.
     pub fn insert_or_update<const IS_ROOT: bool, U>(&mut self, insert_key: &str, insert_value: T, update: &impl Fn(&mut T) -> U) -> InsertOrUpdateResult<T, U> {
-        let split_result = longest_common_prefix(insert_key, &self.key_part, str::char_indices);
+        let split_result = longest_common_prefix(insert_key, &self.key_part, chars);
         match (&mut self.data, split_result) {
             // This is a leaf and its key is exactly equal to the insertion key.
             // -> Replace the value.
@@ -741,7 +741,7 @@ impl<T> Node<T> {
             }
             for (i, child1) in children.iter().enumerate() {
                 for child2 in &children[i+1..] {
-                    let split_result = longest_common_prefix(&child1.key_part, &child2.key_part, str::char_indices);
+                    let split_result = longest_common_prefix(&child1.key_part, &child2.key_part, chars);
                     assert!(split_result.common_prefix.is_empty(), "invariant violated: children of interior nodes must not have a common prefix\n{self:?}");
                 }
             }

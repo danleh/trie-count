@@ -6,7 +6,7 @@ pub struct Node<'a> {
     /// Includes the counts of the children.
     pub count: u64,
     /// Empty if this is a leaf node.
-    pub children: Box<[Node<'a>]>,
+    pub children: Vec<Node<'a>>,
 }
 
 impl<'a> From<&'a Trie<u64>> for Node<'a> {
@@ -22,7 +22,7 @@ impl<'a> From<&'a Trie<u64>> for Node<'a> {
             Node {
                 str: trie_node.key_part(),
                 count,
-                children: children.into_boxed_slice(),
+                children,
             }
         }
         from(&trie.root)
@@ -36,6 +36,22 @@ impl<'data> Node<'data> {
             max_depth = max_depth.max(child.height() + 1);
         }
         max_depth
+    }
+
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&Node<'data>) -> bool,
+    {
+        fn retain<'data, F>(node: &mut Node<'data>, f: &mut F)
+        where
+            F: FnMut(&Node<'data>) -> bool,
+        {
+            for child in node.children.iter_mut() {
+                retain(child, f);
+            }
+            node.children.retain(|node| f(node));
+        }
+        retain(self, &mut f)
     }
 
     pub fn sort_by_key<F, K>(&mut self, mut f: F)

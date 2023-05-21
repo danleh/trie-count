@@ -63,11 +63,17 @@ fn main() -> anyhow::Result<()> {
     // Convert the trie to a tree, where each subtree contains the count of all its children.
     let mut count_tree = count_tree::Node::from(&trie);
 
+    // Filter out nodes that are below the threshold.
+    let total_count = count_tree.count;
+    match options.min {
+        Some(Threshold::Count(threshold)) => count_tree.retain(|node| node.count >= threshold),
+        Some(Threshold::Fraction(threshold)) => count_tree.retain(|node| ProperFraction::new(node.count, total_count).unwrap() >= threshold),
+        None => {}
+    };
+
     // Optionally sort by subtree sizes.
     match options.sort {
-        Some(options::SortOrder::Count) => {
-            count_tree.sort_by_key(|node| std::cmp::Reverse(node.count))
-        }
+        Some(options::SortOrder::Count) => count_tree.sort_by_key(|node| std::cmp::Reverse(node.count)),
         Some(options::SortOrder::Alphabetical) => count_tree.sort_by_key(|node| node.str),
         None => {}
     };
@@ -87,29 +93,19 @@ fn main() -> anyhow::Result<()> {
         total_count: u64,
         max_width: usize,
     ) -> anyhow::Result<()> {
-        // Filter out nodes that are below the threshold.
         let fraction = ProperFraction::new(node.count, total_count).unwrap();
-        match options.min {
-            Some(Threshold::Count(threshold)) if node.count < threshold => return Ok(()),
-            Some(Threshold::Fraction(threshold)) if fraction < threshold => return Ok(()),
-            _ => {}
-        }
 
-        let mut before_bar = options.indent_with.repeat(level);
-        write!(before_bar, "{} ", node.count)?;
+        let mut line = options.indent_with.repeat(level);
+        write!(line, "{} ", node.count)?;
         if options.percent {
-            write!(before_bar, "({:.1}%) ", fraction.0 * 100.0)?;
+            write!(line, "({:.1}%) ", fraction.0 * 100.0)?;
         }
-        write!(before_bar, "'{}'", node.str)?;
+        write!(line, "'{}'", node.str)?;
         // Put the bar right of the other information and align it.
         if options.bar {
-            writeln!(
-                output,
-                "{before_bar:max_width$} {}",
-                unicode_bar(fraction, BAR_WIDTH)
-            )?;
+            writeln!(output, "{line:max_width$} {}", unicode_bar(fraction, BAR_WIDTH))?;
         } else {
-            writeln!(output, "{before_bar}")?;
+            writeln!(output, "{line}")?;
         }
 
         for child in node.children.iter() {
@@ -117,8 +113,6 @@ fn main() -> anyhow::Result<()> {
         }
         Ok(())
     }
-
-    let total_count = count_tree.count;
 
     // Calculate maximum width of a line for indentation of the bar chart.
     let mut max_width = 0;
@@ -128,14 +122,7 @@ fn main() -> anyhow::Result<()> {
     let max_str_len = count_tree.fold(0, |max_str_len, node| max_str_len.max(node.str.len()));
     max_width += max_str_len + 2; // String and quotes.
 
-    print_tree(
-        &mut output,
-        &count_tree,
-        0,
-        &options,
-        total_count,
-        max_width,
-    )
+    print_tree(&mut output, &count_tree, 0, &options, total_count, max_width)
 }
 
 #[derive(Debug, Clone)]

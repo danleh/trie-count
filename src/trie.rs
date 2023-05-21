@@ -502,6 +502,16 @@ impl<T> Node<T> {
         }
     }
 
+    // inserts:
+    // ab
+    // c
+    // ad
+    // trie:
+    // a
+    //   b
+    //   d
+    // c
+
     pub fn remove_exact(&mut self, key: &str) -> Option<T> {
         // TODO: Based on `get_exact`. Maybe refactor into a common function that returns a `&mut Node<T>`?
         todo!()
@@ -841,7 +851,7 @@ const TEST_DELIM: &str = ":";
 
 #[cfg(test)]
 mod test {
-    use std::{assert_matches::assert_matches, cmp::Reverse, collections::HashMap, ops::RangeInclusive};
+    use std::{cmp::Reverse, collections::HashMap, ops::RangeInclusive};
 
 
     use super::*;
@@ -972,7 +982,7 @@ mod test {
     #[test]
     fn test_insert_into_empty_leaf() {
         let mut root = Node::from_test_string(r#""":1"#);
-        assert_matches!(root.insert::<true>("foo", 2), InsertResult::Inserted);
+        assert_eq!(root.insert::<true>("foo", 2), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#"""
   "":1
   "foo":2"#));
@@ -981,7 +991,7 @@ mod test {
     #[test]
     fn test_insert_empty_key() {
         let mut root = Node::from_test_string(r#""foo":1"#);
-        assert_matches!(root.insert::<true>("", 2), InsertResult::Inserted);
+        assert_eq!(root.insert::<true>("", 2), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#"""
   "foo":1
   "":2"#));
@@ -990,26 +1000,26 @@ mod test {
     #[test]
     fn test_insert_duplicate_leaf() {
         let mut root = Node::from_test_string(r#""foo":1"#);
-        assert_matches!(root.insert::<true>("foo", 2), InsertResult::Replaced { old_value: 1 });
+        assert_eq!(root.insert::<true>("foo", 2), InsertResult::Replaced { old_value: 1 });
         assert_eq!(root, Node::from_test_string(r#""foo":2"#));
     }
 
     #[test]
     fn test_insert_split_leaf() {
         let mut root = Node::from_test_string(r#""foo":1"#);
-        assert_matches!(root.insert::<true>("foobar", 2), InsertResult::Inserted);
+        assert_eq!(root.insert::<true>("foobar", 2), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#""foo"
   "":1
   "bar":2"#));
 
         let mut root = Node::from_test_string(r#""foobar":1"#);
-        assert_matches!(root.insert::<true>("foo", 2), InsertResult::Inserted);
+        assert_eq!(root.insert::<true>("foo", 2), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#""foo"
   "bar":1
   "":2"#));
 
         let mut root = Node::from_test_string(r#""foo":1"#);
-        assert_matches!(root.insert::<true>("bar", 2), InsertResult::Inserted);
+        assert_eq!(root.insert::<true>("bar", 2), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#"""
   "foo":1
   "bar":2"#));
@@ -1018,12 +1028,12 @@ mod test {
     #[test]
     fn test_insert_into_empty_root() {
         let mut root: Node<i32> = Node::empty_root();
-        assert_matches!(root.insert::<true>("foo", 1), InsertResult::Inserted);
+        assert_eq!(root.insert::<true>("foo", 1), InsertResult::Inserted);
         // The empty interior node shall be replaced by a leaf node.
         assert_eq!(root, Node::from_test_string(r#""foo":1"#));
 
         let mut root: Node<i32> = Node::empty_root();
-        assert_matches!(root.insert::<true>("", 1), InsertResult::Inserted);
+        assert_eq!(root.insert::<true>("", 1), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#""":1"#));
     }
 
@@ -1032,7 +1042,7 @@ mod test {
         let mut root = Node::from_test_string(r#""foo"
   "bar":1
   "qux":2"#);
-        assert_matches!(root.insert::<true>("foozaz", 3), InsertResult::Inserted);
+        assert_eq!(root.insert::<true>("foozaz", 3), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#""foo"
   "bar":1
   "qux":2
@@ -1044,7 +1054,7 @@ mod test {
         let mut root = Node::from_test_string(r#""foo"
   "bar":1
   "qux":2"#);
-        assert_matches!(root.insert::<true>("foobaz", 3), InsertResult::Inserted);
+        assert_eq!(root.insert::<true>("foobaz", 3), InsertResult::Inserted);
         assert_eq!(root, Node::from_test_string(r#""foo"
   "ba"
     "r":1

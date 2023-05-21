@@ -13,6 +13,7 @@ mod count_tree;
 mod options;
 mod trie;
 mod unicode_bar;
+mod longest_common_prefix;
 
 const BAR_WIDTH: usize = 10;
 

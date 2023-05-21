@@ -1,3 +1,5 @@
+#![feature(pattern)]
+
 use std::fmt::Write;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter};
@@ -5,7 +7,6 @@ use std::io::{self, BufRead, BufReader, BufWriter};
 use anyhow::Context;
 use clap::Parser;
 
-use crate::longest_common_prefix::check_asm;
 use crate::options::{Options, ProperFraction, Threshold};
 use crate::trie::Trie;
 use crate::unicode_bar::unicode_bar;
@@ -22,8 +23,6 @@ fn main() -> anyhow::Result<()> {
     let options = options::Options::parse();
     // DEBUG
     eprintln!("{options:#?}");
-
-    check_asm("foobar", "blablub");
 
     fn monomorphize_trie_splitter<'a, F, I>(key_splitter: F, options: &Options) -> anyhow::Result<()>
     where

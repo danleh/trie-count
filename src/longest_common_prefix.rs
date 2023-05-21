@@ -1,4 +1,3 @@
-use std::iter::once;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct LcpResult<'a> {
@@ -7,28 +6,26 @@ pub struct LcpResult<'a> {
     pub right_rest: &'a str,
 }
 
-pub fn longest_common_prefix<'a, F, I>(left: &'a str, right: &'a str, split_indices: F) -> LcpResult<'a>
+pub fn longest_common_prefix<'a, F, I>(left: &'a str, right: &'a str, split_inclusive: F) -> LcpResult<'a>
 where
     F: Fn(&'a str) -> I,
-    I: Iterator<Item = usize>,
+    I: Iterator<Item = &'a str>,
 {
-    let left_iter = split_indices(left).chain(once(left.len()));
-    let right_iter = split_indices(right).chain(once(right.len()));
+    let left_iter = split_inclusive(left);
+    let right_iter = split_inclusive(right);
 
+    let (mut left_last, mut right_last) = (left.as_ptr(), right.as_ptr());
     let mut difference_start_index = 0;
-    for (left_index, right_index) in left_iter.zip(right_iter) {
-        if left_index != right_index {
+    for (left_part, right_part) in left_iter.zip(right_iter) {
+        debug_assert_eq!(left_last, left_part.as_ptr());
+        debug_assert_eq!(right_last, right_part.as_ptr());
+        left_last = unsafe { left_last.add(left_part.len()) };
+        right_last = unsafe { right_last.add(right_part.len()) };
+
+        if left_part != right_part {
             break;
         }
-        let current_index = left_index;
-
-        let left_substr = unsafe { left.get_unchecked(difference_start_index..current_index) };
-        let right_substr = unsafe { right.get_unchecked(difference_start_index..current_index) };
-        if left_substr != right_substr {
-            break;
-        }
-
-        difference_start_index = current_index;
+        difference_start_index += left_part.len();
     }
     
     LcpResult { 
@@ -38,18 +35,30 @@ where
     }
 }
 
-pub fn chars(s: &str) -> impl Iterator<Item = usize> + '_ {
-    s.char_indices().map(|(i, _c)| i)
+// pub fn chars(s: &str) -> impl Iterator<Item = usize> + '_ {
+//     s.char_indices().map(|(i, _c)| i)
+// }
+
+// pub fn graphemes(s: &str) -> impl Iterator<Item = usize> +'_ {
+//     use unicode_segmentation::UnicodeSegmentation;
+//     s.grapheme_indices(true).map(|(i, _c)| i)
+// }
+
+// #[inline(never)]
+// pub fn check_asm<'a>(a: &'a str, b: &'a str) -> LcpResult<'a> {
+//     longest_common_prefix(a, b, chars)
+// }
+
+// pub fn chars(s: char) -> bool { true }
+// pub fn graphemes()
+
+pub fn chars(s: &str) -> impl Iterator<Item = &str> {
+    s.split_inclusive(|_| true)
 }
 
-pub fn graphemes(s: &str) -> impl Iterator<Item = usize> +'_ {
+pub fn graphemes(s: &str) -> impl Iterator<Item = &str> {
     use unicode_segmentation::UnicodeSegmentation;
-    s.grapheme_indices(true).map(|(i, _c)| i)
-}
-
-#[inline(never)]
-pub fn check_asm<'a>(a: &'a str, b: &'a str) -> LcpResult<'a> {
-    longest_common_prefix(a, b, chars)
+    s.graphemes(true)
 }
 
 #[test]
@@ -105,15 +114,14 @@ fn test() {
 
     // TODO: unicode tests: smileys, German umlauts, etc.
 
-    let result = longest_common_prefix("foo bar", "foo baz", |s| s.match_indices(' ').map(|(i, _c)| i));
+    let result = longest_common_prefix("foo bar", "foo baz", |s| s.split_inclusive(' '));
     assert_eq!(result, LcpResult {
         common_prefix: "foo ",
         left_rest: "bar",
         right_rest: "baz",
     }, "split on space");
 
-    let result = longest_common_prefix("please don't split inside words", "please do not split inside words", 
-    |s| s.split_inclusive(' ').map(|substr| substr.as_bytes().as_ptr() as usize - s.as_bytes().as_ptr() as usize));
+    let result = longest_common_prefix("please don't split inside words", "please do not split inside words", |s| s.split_inclusive(' '));
     assert_eq!(result, LcpResult {
         common_prefix: "please ",
         left_rest: "don't split inside words",

@@ -18,17 +18,17 @@ pub struct Trie<T, F> {
 
     /// Function for determining where to split the key string, e.g., only at specific characters
     /// such as '/', only at unicode grapheme cluster boundaries, or at any character.
-    key_split_function: F,
+    key_splitter: F,
 }
 
 impl<T, F> Trie<T, F>
 where
     F: for <'any> SplitFunction<'any>,
 {
-    pub fn with_key_splitter(key_split_function: F) -> Self {   
+    pub fn with_key_splitter(key_splitter: F) -> Self {   
         Self {
             root: TrieNode::empty_root(),
-            key_split_function,
+            key_splitter,
         }
     }
 
@@ -41,10 +41,9 @@ where
     }
 
     pub fn insert_or_update(&mut self, key: &str, value: T, update: impl Fn(&mut T)) {
-        self.root.insert_or_update::<true, ()>(key, value, &update, self.key_split_function);
+        self.root.insert_or_update::<true, ()>(key, value, &update, self.key_splitter);
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TrieNode<T> {
@@ -53,7 +52,7 @@ pub struct TrieNode<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum NodeData<T> {
+enum NodeData<T> {
     Leaf(T),
     Interior(Vec<TrieNode<T>>),
 }
@@ -157,8 +156,8 @@ impl<T> TrieNode<T> {
     /// Returns the first value for which the given `key_query` is a prefix of the full key, 
     /// or `None` if no such value exists.
     /// Also returns the key.
-    pub fn get_first_with_prefix<'trie>(&'trie self, key_query: &'_ str, key_split_function: impl for <'any> SplitFunction<'any>) -> Option<(/* key */ String, &'trie T)> {
-        if let Some((key_matched, subtrie)) = self.get_all_with_prefix(key_query, key_split_function) {
+    pub fn get_first_with_prefix<'trie>(&'trie self, key_query: &'_ str, key_splitter: impl for <'any> SplitFunction<'any>) -> Option<(/* key */ String, &'trie T)> {
+        if let Some((key_matched, subtrie)) = self.get_all_with_prefix(key_query, key_splitter) {
             if let Some((subtrie_key_parts, value)) = subtrie.external_iter_items_leafs().next() {
                 // I would hope that the string allocation and concetenation is optimized away
                 // if the caller does not use the key, but I am not sure.
@@ -176,9 +175,9 @@ impl<T> TrieNode<T> {
     /// or `None` if none with this prefix exists.
     /// Also returns the part of the key that was matched by parent nodes of the returned subtrie,
     /// i.e., you can concatenate it with the key parts in the returned subtrie to obtain the full keys.
-    pub fn get_all_with_prefix<'trie, 'query>(&'trie self, key_query: &'query str, key_split_function: impl for <'any> SplitFunction<'any>)
+    pub fn get_all_with_prefix<'trie, 'query>(&'trie self, key_query: &'query str, key_splitter: impl for <'any> SplitFunction<'any>)
     -> Option<(/* key_matched */ &'query str, /* matching_subtrie */ &'trie TrieNode<T>)> {
-        fn get_all_with_prefix<'trie, T>(cur_node: &'trie TrieNode<T>, key_query: &'_ str, key_matched_len: usize, key_split_function: impl for <'any> SplitFunction<'any>) 
+        fn get_all_with_prefix<'trie, T>(cur_node: &'trie TrieNode<T>, key_query: &'_ str, key_matched_len: usize, key_splitter: impl for <'any> SplitFunction<'any>) 
         -> Option<(/* key_matched_len */ usize, /* matching_subtrie */ &'trie TrieNode<T>)> {
             match &cur_node.data {
                 NodeData::Leaf(_) =>
@@ -186,14 +185,14 @@ impl<T> TrieNode<T> {
                         return Some((key_matched_len, cur_node))
                     },
                 NodeData::Interior(children) =>
-                    match longest_common_prefix(key_query, &cur_node.key_part, key_split_function) {
+                    match longest_common_prefix(key_query, &cur_node.key_part, key_splitter) {
                         // The queried key was fully a prefix of the current node, so return the whole subtrie.
                         LcpResult { common_prefix: _, left_rest: "", right_rest: _ } =>
                             return Some((key_matched_len, cur_node)),
                         // The current node "consumed" a prefix of the queried key, so search further in the children.
                         LcpResult { common_prefix, left_rest: key_query, right_rest: "" } =>
                             for child in children {
-                                if let Some((key_matched_len, node)) = get_all_with_prefix(child, key_query, key_matched_len + common_prefix.len(), key_split_function) {
+                                if let Some((key_matched_len, node)) = get_all_with_prefix(child, key_query, key_matched_len + common_prefix.len(), key_splitter) {
                                     return Some((key_matched_len, node));
                                 }
                             },
@@ -204,7 +203,7 @@ impl<T> TrieNode<T> {
             }
             None
         }
-        get_all_with_prefix(self, key_query, 0, key_split_function)
+        get_all_with_prefix(self, key_query, 0, key_splitter)
             .map(|(key_matched_len, subtrie)| (&key_query[..key_matched_len], subtrie))
     }
 
@@ -212,7 +211,7 @@ impl<T> TrieNode<T> {
         &mut self,
         insert_key: &str,
         insert_value: T,
-        key_split_function: impl for <'any> SplitFunction<'any>
+        key_splitter: impl for <'any> SplitFunction<'any>
     ) -> InsertResult<T>
     // TODO: Relax the `Clone` requirement, which requires an "Entry API" of some sort.
     where T: Clone
@@ -221,7 +220,7 @@ impl<T> TrieNode<T> {
             insert_key,
             insert_value.clone(),
             &|old_value| std::mem::replace(old_value, insert_value.clone()),
-            key_split_function
+            key_splitter
         ) {
             InsertOrUpdateResult::Inserted => InsertResult::Inserted,
             InsertOrUpdateResult::Updated { result } => InsertResult::Replaced { old_value: result },
@@ -235,9 +234,9 @@ impl<T> TrieNode<T> {
         insert_key: &str,
         insert_value: T,
         update: &impl Fn(&mut T) -> U,
-        key_split_function: impl for <'any> SplitFunction<'any>
+        key_splitter: impl for <'any> SplitFunction<'any>
     ) -> InsertOrUpdateResult<T, U> {
-        let split_result = longest_common_prefix(insert_key, &self.key_part, key_split_function);
+        let split_result = longest_common_prefix(insert_key, &self.key_part, key_splitter);
         match (&mut self.data, split_result) {
             // This is a leaf and its key is exactly equal to the insertion key.
             // -> Replace the value.
@@ -262,7 +261,7 @@ impl<T> TrieNode<T> {
                 // Try to insert into the children.
                 let mut insert_value = insert_value;
                 for child in children.iter_mut() {
-                    match child.insert_or_update::<false, U>(insert_key_rest, insert_value, update, key_split_function) {
+                    match child.insert_or_update::<false, U>(insert_key_rest, insert_value, update, key_splitter) {
                         // Not successful, so try the next child.
                         InsertOrUpdateResult::NoPrefix { value } => insert_value = value,
                         // Successful (either replaced or inserted a new leaf node), so return.

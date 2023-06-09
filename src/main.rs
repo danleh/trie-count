@@ -39,11 +39,11 @@ fn main() -> anyhow::Result<()> {
 
 fn main_with_options(
     options: &Options,
-    split_inclusive: impl for<'any> SplitFunction<'any>,
+    key_splitter: impl for<'any> SplitFunction<'any>,
 ) -> anyhow::Result<()> {
     // Create empty trie.
     // Use provided delimiter pattern to split lines into parts.
-    let mut trie = Trie::with_key_splitter(split_inclusive);
+    let mut trie = Trie::with_key_splitter(key_splitter);
 
     // Read lines from input and insert each into trie.
     let input: Box<dyn io::BufRead> = if let Some(file) = &options.input {

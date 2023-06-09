@@ -49,9 +49,9 @@ impl<'a, 'r> SplitFunction<'a> for RegexSplitter<'r> {
     }
 }
 
-pub fn longest_common_prefix<'a>(left: &'a str, right: &'a str, split_function: impl SplitFunction<'a>) -> LcpResult<'a> {
-    let left_iter = split_function.split(left);
-    let right_iter = split_function.split(right);
+pub fn longest_common_prefix<'a>(left: &'a str, right: &'a str, splitter: impl SplitFunction<'a>) -> LcpResult<'a> {
+    let left_iter = splitter.split(left);
+    let right_iter = splitter.split(right);
 
     let mut difference_start_index = 0;
 

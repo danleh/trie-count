@@ -8,7 +8,7 @@ const KEY_VALUE_DELIMITER: &str = ":";
 
 // Utility methods for testing.
 impl<T> TrieNode<T> {
-    fn assert_invariants<const IS_ROOT: bool>(&self, key_split_function: impl for <'any> SplitFunction<'any>)
+    fn assert_invariants<const IS_ROOT: bool>(&self, key_splitter: impl for <'any> SplitFunction<'any>)
     where T: std::fmt::Debug
     {
         if let NodeData::Interior(children) = &self.data {
@@ -20,12 +20,12 @@ impl<T> TrieNode<T> {
             }
             for (i, child1) in children.iter().enumerate() {
                 for child2 in &children[i+1..] {
-                    let split_result = longest_common_prefix(&child1.key_part, &child2.key_part, key_split_function);
+                    let split_result = longest_common_prefix(&child1.key_part, &child2.key_part, key_splitter);
                     assert!(split_result.common_prefix.is_empty(), "invariant violated: children of interior nodes must not have a common prefix\n{self:?}");
                 }
             }
             for child in children {
-                child.assert_invariants::<false>(key_split_function);
+                child.assert_invariants::<false>(key_splitter);
             }
         }
     }

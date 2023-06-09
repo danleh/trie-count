@@ -16,7 +16,7 @@ use crate::longest_common_prefix::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Trie<T, F> {
-    // FIXME: Hide this better, provide iterator accessors
+    // TODO: Hide this better, provide iterator accessors
     pub(crate) root: TrieNode<T>,
 
     /// Function for determining where to split the key string, e.g., only at specific characters
@@ -35,55 +35,9 @@ where
         }
     }
 
-    pub fn len(&self) -> usize {
-        self.root.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.root.is_empty()
-    }
-
-    pub fn clear(&mut self) {
-        self.root = TrieNode::empty_root();
-    }
-
-    // pub fn insert(&mut self, key: &str, value: T) -> Option<T>
-    // // FIXME: Relax the `Clone` requirement.
-    // where T: Clone
-    // {
-    //     match self.root.insert::<true>(key, value) {
-    //         InsertResult::Inserted => None,
-    //         InsertResult::Replaced { old_value } => Some(old_value),
-    //         InsertResult::NoPrefix { .. } => unreachable!("not possible when inserting into the root node"),
-    //     }
-    // }
-
     pub fn insert_or_update(&mut self, key: &str, value: T, update: impl Fn(&mut T)) {
         self.root.insert_or_update::<true, ()>(key, value, &update, self.key_split_function);
     }
-
-//     pub fn by_levels(&self) -> Vec<(&str, usize)> {
-//         todo!()
-//     }
-
-//     /// Returns (prefix, level, count).
-//     pub fn by_levels_with_count(&self) -> Vec<(&str, usize, usize)> {
-//         let mut result = Vec::new();
-//         // Do not include the always empty root node prefix, so iterate over children.
-//         for child in &self.root.children {
-//             child.by_levels_with_count(0, &mut result);
-//         }
-//         result
-//         // TODO use iterator, see below
-//     }
-
-//     pub fn sort_by_count(&mut self) {
-//         todo!()
-//     }
-
-//     // pub fn graphviz(&self) -> String {
-//     //     todo!()
-//     // }
 }
 
 
@@ -91,11 +45,6 @@ where
 pub struct TrieNode<T> {
     key_part: Box<str>,
     data: NodeData<T>,
-
-    // TODO: Potential extensions, optimizations.
-    // parent: Option<&Node<T>>,
-
-    // TODO: Alternative design: allow interior nodes to have values.
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -277,8 +226,7 @@ impl<T> TrieNode<T> {
     }
 
     // TODO: Replace with `entry` API, using `Entry` and `InsertAction`.
-    // TODO: Can we remove 'a?
-    pub fn insert_or_update<'a, const IS_ROOT: bool, U>(
+    pub fn insert_or_update<const IS_ROOT: bool, U>(
         &mut self,
         insert_key: &str,
         insert_value: T,
@@ -368,13 +316,6 @@ impl<T> TrieNode<T> {
             children.sort_by(|a, b| a.key_part.cmp(&b.key_part));
         }
     }
-
-//     fn sort_by_count(&mut self) {
-//         self.children.sort_by_cached_key(|node| std::cmp::Reverse(node.len()));
-//         for child in &mut self.children {
-//             child.sort_by_count();
-//         }
-//     }
 
     /// Sorts the trie by the result of the given function applied to each node.
     pub fn sort_by_func<F, O>(&mut self, mut f: F)

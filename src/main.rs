@@ -4,9 +4,8 @@ use std::io::{self, BufRead, BufReader, BufWriter};
 
 use anyhow::Context;
 use clap::Parser;
-use regex::Regex;
 
-use crate::longest_common_prefix::{split_at_all_chars, SplitInclusive};
+use crate::longest_common_prefix::{SplitAtAllChars, SplitFunction, RegexSplitter};
 use crate::options::{Options, ProperFraction, Threshold};
 use crate::trie::Trie;
 use crate::unicode_bar::unicode_bar;
@@ -18,16 +17,6 @@ mod unicode_bar;
 mod longest_common_prefix;
 
 const BAR_WIDTH: usize = 10;
-
-#[derive(Clone, Copy)]
-struct RegexSplitter<'r>(&'r Regex);
-
-impl<'a, 'r> SplitInclusive<'a> for RegexSplitter<'r> {
-    type Iter = std::str::SplitInclusive<'a, &'r Regex>;
-    fn call(&self, str: &'a str) -> Self::Iter {
-        str.split_inclusive(self.0)
-    }
-}
 
 fn main() -> anyhow::Result<()> {
     let options = options::Options::parse();
@@ -42,11 +31,11 @@ fn main() -> anyhow::Result<()> {
     if let Some(regex) = &options.split_delimiter {
         monomorphize_trie_splitter(RegexSplitter(regex), &options)?;
     } else {
-        monomorphize_trie_splitter(split_at_all_chars, &options)?;
+        monomorphize_trie_splitter(SplitAtAllChars, &options)?;
     }
     fn monomorphize_trie_splitter<'a, F>(split_inclusive: F, options: &Options) -> anyhow::Result<()>
     where
-        F: for <'any> SplitInclusive<'any>,
+        F: for <'any> SplitFunction<'any>,
     {
         let mut trie = Trie::with_key_splitter(split_inclusive);
 

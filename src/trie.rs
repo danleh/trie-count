@@ -6,7 +6,7 @@
 
 use std::{str::FromStr, marker::PhantomData, iter::Sum, borrow::Borrow};
 
-use crate::longest_common_prefix::{longest_common_prefix, LcpResult, split_at_all_chars, SplitInclusive};
+use crate::longest_common_prefix::{longest_common_prefix, LcpResult, SplitAtAllChars, SplitFunction};
 
 // TODO: generalize over generic sequences of K (e.g., bytes) instead of just `&str`.
 
@@ -23,7 +23,7 @@ pub struct Trie<T, F> {
 impl<T, F> Trie<T, F> {
     pub fn with_key_splitter<'a>(key_splitter: F) -> Self
     where
-        F: for <'any> SplitInclusive<'any>,
+        F: for <'any> SplitFunction<'any>,
     {   
         Self {
             root: Node::empty_root(),
@@ -56,7 +56,7 @@ impl<T, F> Trie<T, F> {
 
     pub fn insert_or_update<'a>(&mut self, key: &str, value: T, update: impl Fn(&mut T))
     where
-        F: for <'any> SplitInclusive<'any>,
+        F: for <'any> SplitFunction<'any>,
     {
         self.root.insert_or_update::<true, (), F>(key, value, &update, self.key_splitter);
     }
@@ -392,8 +392,8 @@ impl<T> Node<T> {
                         return Some((key_matched_len, cur_node))
                     },
                 NodeData::Interior(children) =>
-                    // FIXME generify split_at_all_chars
-                    match longest_common_prefix(key_query, &cur_node.key_part, &split_at_all_chars) {
+                    // FIXME generify SplitAtAllChars
+                    match longest_common_prefix(key_query, &cur_node.key_part, SplitAtAllChars) {
                         // The queried key was fully a prefix of the current node, so return the whole subtrie.
                         LcpResult { common_prefix: _, left_rest: "", right_rest: _ } =>
                             return Some((key_matched_len, cur_node)),
@@ -429,7 +429,7 @@ impl<T> Node<T> {
     // TODO: Replace with `entry` API, using `Entry` and `InsertAction`.
     pub fn insert_or_update<'a, const IS_ROOT: bool, U, F>(&mut self, insert_key: &str, insert_value: T, update: &impl Fn(&mut T) -> U, splitter: F) -> InsertOrUpdateResult<T, U>
     where
-        F: for <'any> SplitInclusive<'any>
+        F: for <'any> SplitFunction<'any>
     {
         let split_result = longest_common_prefix(insert_key, &self.key_part, splitter);
         match (&mut self.data, split_result) {
@@ -735,7 +735,7 @@ impl<T> Node<T> {
             }
             for (i, child1) in children.iter().enumerate() {
                 for child2 in &children[i+1..] {
-                    let split_result = longest_common_prefix(&child1.key_part, &child2.key_part, &split_at_all_chars);
+                    let split_result = longest_common_prefix(&child1.key_part, &child2.key_part, SplitAtAllChars);
                     assert!(split_result.common_prefix.is_empty(), "invariant violated: children of interior nodes must not have a common prefix\n{self:?}");
                 }
             }
@@ -893,7 +893,7 @@ mod test {
 //     #[test]
 //     fn test_insert_into_empty_leaf() {
 //         let mut root = Node::from_test_string(r#""":1"#);
-//         assert_eq!(root.insert::<true>("foo", 2, &split_at_all_chars), InsertResult::Inserted);
+//         assert_eq!(root.insert::<true>("foo", 2, &SplitAtAllChars), InsertResult::Inserted);
 //         assert_eq!(root, Node::from_test_string(r#"""
 //   "":1
 //   "foo":2"#));

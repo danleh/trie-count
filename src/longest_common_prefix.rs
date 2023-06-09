@@ -1,3 +1,5 @@
+use regex::Regex;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct LcpResult<'a> {
     pub common_prefix: &'a str,
@@ -5,30 +7,51 @@ pub struct LcpResult<'a> {
     pub right_rest: &'a str,
 }
 
-pub trait SplitInclusive<'a> : Copy {
+// `Copy` such that the split function is cheap to pass around by value and copy (e.g. just a
+// function pointer or a closure with a by-reference captured environment).
+pub trait SplitFunction<'a> : Copy {
     type Iter: Iterator<Item = &'a str>;
-    fn call(&self, str: &'a str) -> Self::Iter;
+    fn split(&self, str: &'a str) -> Self::Iter;
 }
 
-impl<'a, F, I> SplitInclusive<'a> for F
+// Implementation for any closure that takes a `&str` slice and returns an iterator over subslices.
+impl<'a, F, I> SplitFunction<'a> for F
 where
-    F: Fn(&'a str) -> I,
     F: Copy,
+    F: Fn(&'a str) -> I,
     I: Iterator<Item = &'a str>,
 {
     type Iter = I;
-    fn call(&self, str: &'a str) -> Self::Iter {
+    fn split(&self, str: &'a str) -> Self::Iter {
         self(str)
     }
 }
 
-// TODO use split_points again, i.e., F returning an iterator of usize instead of &str.
-pub fn longest_common_prefix<'a, F>(left: &'a str, right: &'a str, split_inclusive: F) -> LcpResult<'a>
-where
-    F: SplitInclusive<'a>
-{
-    let left_iter: F::Iter = split_inclusive.call(left);
-    let right_iter: F::Iter = split_inclusive.call(right);
+// Trivial implementation for splitting at all characters.
+#[derive(Clone, Copy)]
+pub struct SplitAtAllChars;
+
+impl<'a> SplitFunction<'a> for SplitAtAllChars {
+    type Iter = std::str::SplitInclusive<'a, fn(char) -> bool>;
+    fn split(&self, str: &'a str) -> Self::Iter {
+        str.split_inclusive(|_| true)
+    }
+}
+
+// Implementation for splitting at a regex.
+#[derive(Clone, Copy)]
+pub struct RegexSplitter<'r>(pub &'r Regex);
+
+impl<'a, 'r> SplitFunction<'a> for RegexSplitter<'r> {
+    type Iter = std::str::SplitInclusive<'a, &'r Regex>;
+    fn split(&self, str: &'a str) -> Self::Iter {
+        str.split_inclusive(self.0)
+    }
+}
+
+pub fn longest_common_prefix<'a>(left: &'a str, right: &'a str, split_function: impl SplitFunction<'a>) -> LcpResult<'a> {
+    let left_iter = split_function.split(left);
+    let right_iter = split_function.split(right);
 
     let mut difference_start_index = 0;
 
@@ -54,41 +77,37 @@ where
     }
 }
 
-pub fn split_at_all_chars(s: &str) -> impl Iterator<Item = &str> {
-    s.split_inclusive(|_| true)
-}
-
 #[test]
 fn test_ascii() {
-    let result = longest_common_prefix("", "", split_at_all_chars);
+    let result = longest_common_prefix("", "", SplitAtAllChars);
     assert_eq!(result, LcpResult {
         common_prefix: "",
         left_rest: "",
         right_rest: "",
     }, "empty strings");
 
-    let result = longest_common_prefix("foo", "foo", split_at_all_chars);
+    let result = longest_common_prefix("foo", "foo", SplitAtAllChars);
     assert_eq!(result, LcpResult {
         common_prefix: "foo",
         left_rest: "",
         right_rest: "",
     }, "equal strings");
 
-    let result = longest_common_prefix("foo", "foobar", split_at_all_chars);
+    let result = longest_common_prefix("foo", "foobar", SplitAtAllChars);
     assert_eq!(result, LcpResult {
         common_prefix: "foo",
         left_rest: "",
         right_rest: "bar",
     }, "left is prefix of right");
 
-    let result = longest_common_prefix("foobar", "foo", split_at_all_chars);
+    let result = longest_common_prefix("foobar", "foo", SplitAtAllChars);
     assert_eq!(result, LcpResult {
         common_prefix: "foo",
         left_rest: "bar",
         right_rest: "",
     }, "right is prefix of left");
 
-    let result = longest_common_prefix("foo", "bar", split_at_all_chars);
+    let result = longest_common_prefix("foo", "bar", SplitAtAllChars);
     assert_eq!(result, LcpResult {
         common_prefix: "",
         left_rest: "foo",

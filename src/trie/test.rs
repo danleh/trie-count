@@ -1,4 +1,4 @@
-use std::{cmp::Reverse, collections::HashMap, ops::RangeInclusive};
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use super::*;
@@ -305,7 +305,7 @@ fn insert_split_interior() {
   "qux":2"#));
 }
 
-fn generate_random_items(count: usize, max_string_len: usize, charset: RangeInclusive<char>) -> impl Iterator<Item=(String, usize)> {
+fn generate_random_items(count: usize, max_string_len: usize, charset: std::ops::RangeInclusive<char>) -> impl Iterator<Item=(String, usize)> {
     use rand::{Rng, distributions::Uniform, prelude::Distribution};
     let char_distribution = Uniform::from(charset);
 
@@ -417,6 +417,7 @@ fn sort_by_value() {
     "":4
     "zaz":3
   "qux":1"#);
+    use std::cmp::Reverse;
     root.sort_by_func(|node| match &node.data {
         // Normally, None is sorted before Some, but we want it the other way around.
         NodeData::Leaf(value) => Reverse(Some(Reverse(*value))),

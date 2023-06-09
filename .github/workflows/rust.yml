@@ -1,8 +1,7 @@
 on: [push, pull_request]
 
+# Fail CI if there are warnings.
 env:
-  CARGO_TERM_COLOR: always
-  # Fail CI if there are warnings.
   RUSTFLAGS: "-D warnings"
 
 jobs:

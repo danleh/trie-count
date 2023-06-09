@@ -20,5 +20,7 @@ walkdir = "2.3.3"
 unicode-segmentation = "1.10.1"
 
 [profile.release]
-overflow-checks = true
+opt-level = 3
 lto = true
+overflow-checks = true
+debug = 2

@@ -131,18 +131,6 @@ fn test_trie() -> TrieNode<u32> {
 }
 
 #[test]
-fn iter_lending() {
-    let root = test_trie();
-    let mut iter = root.external_iter_items_leafs();
-    assert_eq!(iter.next(), Some((&["foo", "bar", ""][..], &0)));
-    assert_eq!(iter.next(), Some((&["foo", "bar", "qux"][..], &1)));
-    assert_eq!(iter.next(), Some((&["foo", "qux"][..], &2)));
-    assert_eq!(iter.next(), Some((&["foo", ""][..], &3)));
-    assert_eq!(iter.next(), None);
-}
-
-
-#[test]
 fn to_test_string() {
     let root = test_trie();
     let actual = root.to_test_string();
@@ -176,6 +164,27 @@ fn len_and_is_empty() {
     let root = test_trie();
     assert_eq!(root.len(), 4);
     assert!(!root.is_empty());
+}
+
+#[test]
+fn iter_lending() {
+    let root = test_trie();
+    let mut iter = root.external_iter_items_leafs();
+    assert_eq!(iter.next(), Some((&["foo", "bar", ""][..], &0)));
+    assert_eq!(iter.next(), Some((&["foo", "bar", "qux"][..], &1)));
+    assert_eq!(iter.next(), Some((&["foo", "qux"][..], &2)));
+    assert_eq!(iter.next(), Some((&["foo", ""][..], &3)));
+    assert_eq!(iter.next(), None);
+}
+
+#[test]
+fn internal_and_external_iterator_agree() {
+    let root = test_trie();
+    let mut iter = root.external_iter_items();
+    root.internal_iter_items(|key_parts, maybe_value| {
+        assert_eq!(iter.next(), Some((key_parts, maybe_value)));
+    });
+    assert_eq!(iter.next(), None);
 }
 
 #[test]
@@ -296,7 +305,7 @@ fn insert_split_interior() {
   "qux":2"#));
 }
 
-fn generate_random_values(count: usize, max_string_len: usize, charset: RangeInclusive<char>) -> impl Iterator<Item=(String, usize)> {
+fn generate_random_items(count: usize, max_string_len: usize, charset: RangeInclusive<char>) -> impl Iterator<Item=(String, usize)> {
     use rand::{Rng, distributions::Uniform, prelude::Distribution};
     let char_distribution = Uniform::from(charset);
 
@@ -318,7 +327,7 @@ fn insert_random_strings() {
     let mut root = TrieNode::empty_root();
     let mut hashmap_reference = HashMap::new();
 
-    for (str, value) in generate_random_values(20, 5, 'A'..='C') {
+    for (str, value) in generate_random_items(20, 5, 'A'..='C') {
         println!("{}", root.to_test_string());
 
         print!("insert {str:?}:{value}");
@@ -379,7 +388,7 @@ fn sort_by_key() {
 fn sort_by_key_random() {
     let mut root = TrieNode::empty_root();
     let mut hashmap_reference = HashMap::new();
-    for (str, value) in generate_random_values(20, 5, 'A'..='C') {
+    for (str, value) in generate_random_items(20, 5, 'A'..='C') {
         root.insert::<true>(&str, value, SplitAtAllChars);
         hashmap_reference.insert(str, value);
     }

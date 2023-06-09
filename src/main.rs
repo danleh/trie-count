@@ -1,5 +1,8 @@
 #![feature(pattern)]
 
+#![feature(type_alias_impl_trait)]
+#![feature(return_position_impl_trait_in_trait)]
+
 use std::fmt::Write;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter};

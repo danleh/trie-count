@@ -1,4 +1,5 @@
-use crate::trie::{self, Trie};
+use crate::trie::Trie;
+use crate::trie::TrieNode;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Node<'a> {
@@ -11,7 +12,7 @@ pub struct Node<'a> {
 
 impl<'a, F> From<&'a Trie<u64, F>> for Node<'a> {
     fn from(trie: &'a Trie<u64, F>) -> Self {
-        fn from(trie_node: &trie::Node<u64>) -> Node {
+        fn from(trie_node: &TrieNode<u64>) -> Node {
             let mut count = trie_node.value().copied().unwrap_or(0);
             let mut children = Vec::new();
             for trie_node in trie_node.children() {

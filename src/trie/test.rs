@@ -4,7 +4,7 @@ use std::str::FromStr;
 use super::*;
 
 // Utility methods for testing.
-impl<T> Node<T> {
+impl<T> TrieNode<T> {
     fn assert_invariants<const IS_ROOT: bool>(&self, key_split_function: impl for <'any> SplitFunction<'any>)
     where T: std::fmt::Debug
     {
@@ -83,7 +83,7 @@ impl<T> Node<T> {
 
             match maybe_value {
                 Some(value) => {
-                    subtries.push((level, Node::leaf(key_part, value)));
+                    subtries.push((level, TrieNode::leaf(key_part, value)));
                 },
                 None => {
                     let mut children = Vec::new();
@@ -99,7 +99,7 @@ impl<T> Node<T> {
                             unreachable!();
                         }
                     }
-                    subtries.push((level, Node::interior(key_part, children))); 
+                    subtries.push((level, TrieNode::interior(key_part, children))); 
                 },
             }
         }
@@ -117,14 +117,14 @@ impl<T> Node<T> {
 /// ├── "qux" -> 2
 /// └── "" -> 3
 #[cfg(test)]
-fn test_trie() -> Node<u32> {
-    Node::interior("foo", vec![
-        Node::interior("bar", vec![
-            Node::leaf("", 0),
-            Node::leaf("qux", 1),
+fn test_trie() -> TrieNode<u32> {
+    TrieNode::interior("foo", vec![
+        TrieNode::interior("bar", vec![
+            TrieNode::leaf("", 0),
+            TrieNode::leaf("qux", 1),
         ]),
-        Node::leaf("qux", 2),
-        Node::leaf("", 3),
+        TrieNode::leaf("qux", 2),
+        TrieNode::leaf("", 3),
     ])
 }
 
@@ -160,17 +160,17 @@ fn test_to_string() {
 fn test_from_string() {
     let expected = test_trie();
     let string = expected.to_test_string();
-    let actual = Node::from_test_string(&string);
+    let actual = TrieNode::from_test_string(&string);
     assert_eq!(actual, expected);
 }
 
 #[test]
 fn test_len_and_is_empty() {
-    let root: Node<u32> = Node::empty_root();
+    let root: TrieNode<u32> = TrieNode::empty_root();
     assert_eq!(root.len(), 0);
     assert!(root.is_empty());
 
-    let root = Node::leaf("foobar", 42);
+    let root = TrieNode::leaf("foobar", 42);
     assert_eq!(root.len(), 1);
     assert!(!root.is_empty());
 
@@ -183,8 +183,8 @@ fn test_len_and_is_empty() {
 fn test_get_all_with_prefix() {
     let root = test_trie();
 
-    assert_eq!(root.get_all_with_prefix("fooqux", SplitAtAllChars), Some(("foo", (&Node::leaf("qux", 2)))));
-    assert_eq!(root.get_all_with_prefix("foobarqux", SplitAtAllChars), Some(("foobar", (&Node::leaf("qux", 1)))));
+    assert_eq!(root.get_all_with_prefix("fooqux", SplitAtAllChars), Some(("foo", (&TrieNode::leaf("qux", 2)))));
+    assert_eq!(root.get_all_with_prefix("foobarqux", SplitAtAllChars), Some(("foobar", (&TrieNode::leaf("qux", 1)))));
     
     assert_eq!(root.get_all_with_prefix("xyz", SplitAtAllChars), None);
     
@@ -210,75 +210,75 @@ fn test_get_first_with_prefix() {
 
 #[test]
 fn test_empty_trie() {
-    let root: Node<i32> = Node::empty_root();
-    assert_eq!(root, Node::interior("", Vec::new()));
+    let root: TrieNode<i32> = TrieNode::empty_root();
+    assert_eq!(root, TrieNode::interior("", Vec::new()));
 }
 
 #[test]
 fn test_insert_into_empty_leaf() {
-    let mut root = Node::from_test_string(r#""":1"#);
+    let mut root = TrieNode::from_test_string(r#""":1"#);
     assert_eq!(root.insert::<true>("foo", 2, SplitAtAllChars), InsertResult::Inserted);
-    assert_eq!(root, Node::from_test_string(r#"""
+    assert_eq!(root, TrieNode::from_test_string(r#"""
   "":1
   "foo":2"#));
 }
 
 #[test]
 fn test_insert_empty_key() {
-    let mut root = Node::from_test_string(r#""foo":1"#);
+    let mut root = TrieNode::from_test_string(r#""foo":1"#);
     assert_eq!(root.insert::<true>("", 2, SplitAtAllChars), InsertResult::Inserted);
-    assert_eq!(root, Node::from_test_string(r#"""
+    assert_eq!(root, TrieNode::from_test_string(r#"""
   "foo":1
   "":2"#));
 }
 
 #[test]
 fn test_insert_duplicate_leaf() {
-    let mut root = Node::from_test_string(r#""foo":1"#);
+    let mut root = TrieNode::from_test_string(r#""foo":1"#);
     assert_eq!(root.insert::<true>("foo", 2, SplitAtAllChars), InsertResult::Replaced { old_value: 1 });
-    assert_eq!(root, Node::from_test_string(r#""foo":2"#));
+    assert_eq!(root, TrieNode::from_test_string(r#""foo":2"#));
 }
 
 #[test]
 fn test_insert_split_leaf() {
-    let mut root = Node::from_test_string(r#""foo":1"#);
+    let mut root = TrieNode::from_test_string(r#""foo":1"#);
     assert_eq!(root.insert::<true>("foobar", 2, SplitAtAllChars), InsertResult::Inserted);
-    assert_eq!(root, Node::from_test_string(r#""foo"
+    assert_eq!(root, TrieNode::from_test_string(r#""foo"
   "":1
   "bar":2"#));
 
-    let mut root = Node::from_test_string(r#""foobar":1"#);
+    let mut root = TrieNode::from_test_string(r#""foobar":1"#);
     assert_eq!(root.insert::<true>("foo", 2, SplitAtAllChars), InsertResult::Inserted);
-    assert_eq!(root, Node::from_test_string(r#""foo"
+    assert_eq!(root, TrieNode::from_test_string(r#""foo"
   "bar":1
   "":2"#));
 
-    let mut root = Node::from_test_string(r#""foo":1"#);
+    let mut root = TrieNode::from_test_string(r#""foo":1"#);
     assert_eq!(root.insert::<true>("bar", 2, SplitAtAllChars), InsertResult::Inserted);
-    assert_eq!(root, Node::from_test_string(r#"""
+    assert_eq!(root, TrieNode::from_test_string(r#"""
   "foo":1
   "bar":2"#));
 }
 
 #[test]
 fn test_insert_into_empty_root() {
-    let mut root: Node<i32> = Node::empty_root();
+    let mut root: TrieNode<i32> = TrieNode::empty_root();
     assert_eq!(root.insert::<true>("foo", 1, SplitAtAllChars), InsertResult::Inserted);
     // The empty interior node shall be replaced by a leaf node.
-    assert_eq!(root, Node::from_test_string(r#""foo":1"#));
+    assert_eq!(root, TrieNode::from_test_string(r#""foo":1"#));
 
-    let mut root: Node<i32> = Node::empty_root();
+    let mut root: TrieNode<i32> = TrieNode::empty_root();
     assert_eq!(root.insert::<true>("", 1, SplitAtAllChars), InsertResult::Inserted);
-    assert_eq!(root, Node::from_test_string(r#""":1"#));
+    assert_eq!(root, TrieNode::from_test_string(r#""":1"#));
 }
 
 #[test]
 fn test_insert_interior() {
-    let mut root = Node::from_test_string(r#""foo"
+    let mut root = TrieNode::from_test_string(r#""foo"
   "bar":1
   "qux":2"#);
     assert_eq!(root.insert::<true>("foozaz", 3, SplitAtAllChars), InsertResult::Inserted);
-    assert_eq!(root, Node::from_test_string(r#""foo"
+    assert_eq!(root, TrieNode::from_test_string(r#""foo"
   "bar":1
   "qux":2
   "zaz":3"#));
@@ -286,11 +286,11 @@ fn test_insert_interior() {
 
 #[test]
 fn test_insert_split_interior() {
-    let mut root = Node::from_test_string(r#""foo"
+    let mut root = TrieNode::from_test_string(r#""foo"
   "bar":1
   "qux":2"#);
     assert_eq!(root.insert::<true>("foobaz", 3, SplitAtAllChars), InsertResult::Inserted);
-    assert_eq!(root, Node::from_test_string(r#""foo"
+    assert_eq!(root, TrieNode::from_test_string(r#""foo"
   "ba"
     "r":1
     "z":3
@@ -316,7 +316,7 @@ fn random_values(count: usize, max_string_len: usize, charset: RangeInclusive<ch
 
 #[test]
 fn test_insert_random_strings() {
-    let mut root = Node::empty_root();
+    let mut root = TrieNode::empty_root();
     let mut hashmap_reference = HashMap::new();
 
     for (str, value) in random_values(20, 5, 'A'..='C') {
@@ -359,26 +359,26 @@ fn test_insert_random_strings() {
 
 #[test]
 fn test_sort_by_key() {
-    let mut root: Node<i32> = Node::from_test_string(r#""foo"
+    let mut root: TrieNode<i32> = TrieNode::from_test_string(r#""foo"
   "qux":1
   "bar":2"#);
     root.sort_by_key();
-    assert_eq!(root, Node::from_test_string(r#""foo"
+    assert_eq!(root, TrieNode::from_test_string(r#""foo"
   "bar":2
   "qux":1"#));
 
-    let mut root: Node<i32> = Node::from_test_string(r#""foo"
+    let mut root: TrieNode<i32> = TrieNode::from_test_string(r#""foo"
   "bar":1
   "":2"#);
     root.sort_by_key();
-    assert_eq!(root, Node::from_test_string(r#""foo"
+    assert_eq!(root, TrieNode::from_test_string(r#""foo"
   "":2
   "bar":1"#));
 }
 
 #[test]
 fn test_sort_by_key_random() {
-    let mut root = Node::empty_root();
+    let mut root = TrieNode::empty_root();
     let mut hashmap_reference = HashMap::new();
     for (str, value) in random_values(20, 5, 'A'..='C') {
         root.insert::<true>(&str, value, SplitAtAllChars);
@@ -403,7 +403,7 @@ fn test_sort_by_key_random() {
 
 #[test]
 fn test_sort_by_value() {
-    let mut root: Node<i32> = Node::from_test_string(r#""foo"
+    let mut root: TrieNode<i32> = TrieNode::from_test_string(r#""foo"
   "":2
   "bar"
     "":4
@@ -414,7 +414,7 @@ fn test_sort_by_value() {
         NodeData::Leaf(value) => Reverse(Some(Reverse(*value))),
         NodeData::Interior(_) => Reverse(None),
     });
-    assert_eq!(root, Node::from_test_string(r#""foo"
+    assert_eq!(root, TrieNode::from_test_string(r#""foo"
   "qux":1
   "":2
   "bar"
@@ -424,7 +424,7 @@ fn test_sort_by_value() {
 
 #[test]
 fn test_directory_tree() {
-    let mut root: Node<()> = Node::empty_root();
+    let mut root: TrieNode<()> = TrieNode::empty_root();
 
     for entry in walkdir::WalkDir::new(".") {
         let entry = entry.unwrap();

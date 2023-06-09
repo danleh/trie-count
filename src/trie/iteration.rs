@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::marker::PhantomData;
 
-use super::Node;
+use super::TrieNode;
 
 /// Trait for abstracting over the tracking of keys in the iteratior:
 /// Either the keys are tracked (and the current `KeyParts` stored in the `KeyStack`),
@@ -39,19 +39,19 @@ impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
 /// Trait for abstracting over `Value`s returned by the iterator:
 /// Either both leafs and interior nodes are returned, or only leafs.
 pub trait Value<'trie, T>: Sized {
-    fn from(node: &'trie Node<T>) -> Option<Self>;
+    fn from(node: &'trie TrieNode<T>) -> Option<Self>;
 }
 
 /// Implementation for iterating only over leaf nodes (which always have a value).
 impl<'trie, T> Value<'trie, T> for &'trie T {
-    fn from(node: &'trie Node<T>) -> Option<Self> {
+    fn from(node: &'trie TrieNode<T>) -> Option<Self> {
         node.value()
     }
 }
 
 /// Implementation for iterating over all nodes, including interior nodes (which are `None`).
 impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
-    fn from(node: &'trie Node<T>) -> Option<Self> {
+    fn from(node: &'trie TrieNode<T>) -> Option<Self> {
         Some(node.value())
     }
 }
@@ -61,7 +61,7 @@ impl<'trie, T: 'trie> Value<'trie, T> for Option<&'trie T> {
 pub struct Iter<'trie, T, K, V> {
     /// A worklist of nodes still to process.
     /// `None` is used as a marker to indicate to pop the last element from the `key_parts_stack`.
-    node_stack: Vec<Option<&'trie Node<T>>>,
+    node_stack: Vec<Option<&'trie TrieNode<T>>>,
 
     /// The parts of the current key, as encountered along the spine of the tree.
     key_parts_stack: K,
@@ -77,7 +77,7 @@ where
     KS: KeyStack<'trie> + Default,
     V: Value<'trie, T>,
 {
-    pub fn new(root: &'trie Node<T>) -> Self {
+    pub fn new(root: &'trie TrieNode<T>) -> Self {
         Self {
             node_stack: vec![Some(root)],
             key_parts_stack: KS::default(),
@@ -106,7 +106,7 @@ where
     }
 }
 
-impl<T> Node<T> {
+impl<T> TrieNode<T> {
     /// Generic interior pre-order depth-first traversal of the trie, configurable by `K` and `V`.
     fn internal_iter_generic<'trie, KS, V, F>(&'trie self, key_parts_stack: &mut KS, f: &mut F)
     where

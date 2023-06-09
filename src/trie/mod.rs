@@ -17,7 +17,7 @@ use crate::longest_common_prefix::*;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Trie<T, F> {
     // FIXME: Hide this better, provide iterator accessors
-    pub(crate) root: Node<T>,
+    pub(crate) root: TrieNode<T>,
 
     /// Function for determining where to split the key string, e.g., only at specific characters
     /// such as '/', only at unicode grapheme cluster boundaries, or at any character.
@@ -30,7 +30,7 @@ where
 {
     pub fn with_key_splitter(key_split_function: F) -> Self {   
         Self {
-            root: Node::empty_root(),
+            root: TrieNode::empty_root(),
             key_split_function,
         }
     }
@@ -44,7 +44,7 @@ where
     }
 
     pub fn clear(&mut self) {
-        self.root = Node::empty_root();
+        self.root = TrieNode::empty_root();
     }
 
     // pub fn insert(&mut self, key: &str, value: T) -> Option<T>
@@ -88,7 +88,7 @@ where
 
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Node<T> {
+pub struct TrieNode<T> {
     key_part: Box<str>,
     data: NodeData<T>,
 
@@ -101,22 +101,22 @@ pub struct Node<T> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NodeData<T> {
     Leaf(T),
-    Interior(Vec<Node<T>>),
+    Interior(Vec<TrieNode<T>>),
 }
 
-impl<T> Node<T> {
+impl<T> TrieNode<T> {
 
     // Constructors:
 
     fn leaf(str: &str, value: T) -> Self {
-        Node {
+        TrieNode {
             key_part: str.into(),
             data: NodeData::Leaf(value),
         }
     }
 
-    fn interior(str: &str, children: Vec<Node<T>>) -> Self {
-        Node {
+    fn interior(str: &str, children: Vec<TrieNode<T>>) -> Self {
+        TrieNode {
             key_part: str.into(),
             data: NodeData::Interior(children),
         }
@@ -147,7 +147,7 @@ impl<T> Node<T> {
         &self.key_part
     }
 
-    pub fn children(&self) -> std::slice::Iter<Node<T>> {
+    pub fn children(&self) -> std::slice::Iter<TrieNode<T>> {
         match &self.data {
             NodeData::Leaf(_) => [].iter(),
             NodeData::Interior(children) => children.iter(),
@@ -223,9 +223,9 @@ impl<T> Node<T> {
     /// Also returns the part of the key that was matched by parent nodes of the returned subtrie,
     /// i.e., you can concatenate it with the key parts in the returned subtrie to obtain the full keys.
     pub fn get_all_with_prefix<'trie, 'query>(&'trie self, key_query: &'query str, key_split_function: impl for <'any> SplitFunction<'any>)
-    -> Option<(/* key_matched */ &'query str, /* matching_subtrie */ &'trie Node<T>)> {
-        fn get_all_with_prefix<'trie, T>(cur_node: &'trie Node<T>, key_query: &'_ str, key_matched_len: usize, key_split_function: impl for <'any> SplitFunction<'any>) 
-        -> Option<(/* key_matched_len */ usize, /* matching_subtrie */ &'trie Node<T>)> {
+    -> Option<(/* key_matched */ &'query str, /* matching_subtrie */ &'trie TrieNode<T>)> {
+        fn get_all_with_prefix<'trie, T>(cur_node: &'trie TrieNode<T>, key_query: &'_ str, key_matched_len: usize, key_split_function: impl for <'any> SplitFunction<'any>) 
+        -> Option<(/* key_matched_len */ usize, /* matching_subtrie */ &'trie TrieNode<T>)> {
             match &cur_node.data {
                 NodeData::Leaf(_) =>
                     if cur_node.key_part.starts_with(key_query) {
@@ -300,7 +300,7 @@ impl<T> Node<T> {
                 debug_assert!(common_prefix.is_empty());
                 debug_assert!(right_rest.is_empty());
 
-                *self = Node::leaf(insert_key, insert_value);
+                *self = TrieNode::leaf(insert_key, insert_value);
                 InsertOrUpdateResult::Inserted
             }
 
@@ -320,7 +320,7 @@ impl<T> Node<T> {
 
                 // No child could be found where the insert could take place,
                 // so we must create a new leaf node.
-                let insert_new_leaf = Node::leaf(insert_key_rest, insert_value);
+                let insert_new_leaf = TrieNode::leaf(insert_key_rest, insert_value);
                 children.push(insert_new_leaf);
                 InsertOrUpdateResult::Inserted
             }
@@ -338,8 +338,8 @@ impl<T> Node<T> {
             // -> Split this node into an interior node with the common prefix as key,
             // and two leaf nodes as children, one for the old self's subtrie and one for the newly inserted value.
             (_, LcpResult { common_prefix, left_rest: insert_key_rest, right_rest: self_key_rest }) => {
-                let new_leaf = Node::leaf(insert_key_rest, insert_value);
-                let new_interior = Node::interior(common_prefix, Vec::with_capacity(2));
+                let new_leaf = TrieNode::leaf(insert_key_rest, insert_value);
+                let new_interior = TrieNode::interior(common_prefix, Vec::with_capacity(2));
                 self.key_part = self_key_rest.into();
                 let old_self = std::mem::replace(self, new_interior);
                 match &mut self.data /* == new_interior.data */ {
@@ -379,12 +379,12 @@ impl<T> Node<T> {
     /// Sorts the trie by the result of the given function applied to each node.
     pub fn sort_by_func<F, O>(&mut self, mut f: F)
     where
-        F: FnMut(&Node<T>) -> O,
+        F: FnMut(&TrieNode<T>) -> O,
         O: Ord,
     {
-        fn sort_by_func<T, F, O>(cur_node: &mut Node<T>, f: &mut F)
+        fn sort_by_func<T, F, O>(cur_node: &mut TrieNode<T>, f: &mut F)
         where
-            F: FnMut(&Node<T>) -> O,
+            F: FnMut(&TrieNode<T>) -> O,
             O: Ord,
         {
             if let NodeData::Interior(children) = &mut cur_node.data {
@@ -417,7 +417,7 @@ pub enum InsertOrUpdateResult<T, U> {
 pub enum Entry<'trie, T> {
     Present(&'trie mut T),
     Vacant {
-        node: &'trie mut Node<T>,
+        node: &'trie mut TrieNode<T>,
         insert_key_rest: &'trie str,
         insert_action: InsertAction,
     },

@@ -101,7 +101,9 @@ pub fn longest_common_prefix<'a>(left: &'a str, right: &'a str, splitter: impl S
         difference_start_index += left_part.len();
     }
     
-    LcpResult { 
+    LcpResult {
+        // SAFETY: We know that the `difference_start_index` is at a valid UTF-8 codepoint boundary,
+        // because it comes from valid UTF-8 string subslices.
         common_prefix: unsafe { left.get_unchecked(..difference_start_index) },
         left_rest: unsafe { left.get_unchecked(difference_start_index..) },
         right_rest: unsafe { right.get_unchecked(difference_start_index..) },

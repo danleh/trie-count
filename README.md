@@ -1,25 +1,27 @@
-# Trie Count Utility
+# Trie Count
 
-This is a simple command line utility that takes a list of strings as input and produces a trie data structure as output.
-The trie gives a count for each prefix of the input strings.
+A command line utility that takes a list of strings as input and produces a [trie (prefix tree)](https://en.wikipedia.org/wiki/Trie) as output.
+The trie associates a count (how often the string occurred) for each prefix of the input strings.
 
-Example:
+Simple example:
 
     $ cat tests/inputs/simple.txt
     abc
     abd
     abe
-    f
+    a
     
-    $ tc tests/inputs/simple.txt
-    4
-      3 ab
-        1 c
-        1 d
-        1 e
-      1 f
+    $ tc --quote tests/inputs/simple.txt
+    4 'a'
+      3 'b'
+        1 'c'
+        1 'd'
+        1 'e'
+      1 ''
 
-Example for paths:
+The trie lets you quickly determine that there are 4 strings that start with `a`, 3 strings that start with `ab`, etc.
+
+Building a trie can also be useful for exploring directory trees:
 
     $ find -type f
     ./Cargo.toml
@@ -35,7 +37,7 @@ Example for paths:
       1 Cargo.toml
       1 Cargo.lock
 
-Advanced example, combining with other UNIX tools, e.g., summing words in a directory tree:
+Advanced example, where in combination with other UNIX tools one can, e.g., determine which parts of a directory tree contains the most words:
 
     $ find -type f | xargs wc -w | head -n-1
     42 src/options.rs

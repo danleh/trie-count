@@ -1,6 +1,6 @@
 #[test]
 fn readme_examples() {
-    testcase("simple", []);
+    testcase("simple", ["--quote"]);
     testcase("paths", ["--split-delimiter=/", "--sort=count"]);
     testcase("word-counts", ["--counted-input", "-d/", "-sc"]);
 }

@@ -6,7 +6,7 @@
 
 use std::{str::FromStr, marker::PhantomData, iter::Sum, borrow::Borrow};
 
-use crate::longest_common_prefix::{longest_common_prefix, LcpResult, split_at_all_chars};
+use crate::longest_common_prefix::{longest_common_prefix, LcpResult, split_at_all_chars, SplitInclusive};
 
 // TODO: generalize over generic sequences of K (e.g., bytes) instead of just `&str`.
 
@@ -21,10 +21,9 @@ pub struct Trie<T, F> {
 }
 
 impl<T, F> Trie<T, F> {
-    pub fn with_key_splitter<'a, I>(key_splitter: F) -> Self
+    pub fn with_key_splitter<'a>(key_splitter: F) -> Self
     where
-        F: Fn(&'_ str) -> I,
-        I: Iterator<Item = &'a str>,
+        F: for <'any> SplitInclusive<'any>,
     {   
         Self {
             root: Node::empty_root(),
@@ -55,12 +54,11 @@ impl<T, F> Trie<T, F> {
     //     }
     // }
 
-    pub fn insert_or_update<'a, I>(&mut self, key: &str, value: T, update: impl Fn(&mut T))
+    pub fn insert_or_update<'a>(&mut self, key: &str, value: T, update: impl Fn(&mut T))
     where
-        F: Fn(&'_ str) -> I,
-        I: Iterator<Item = &'a str>,
+        F: for <'any> SplitInclusive<'any>,
     {
-        self.root.insert_or_update::<true, (), F, I>(key, value, &update, &self.key_splitter);
+        self.root.insert_or_update::<true, (), F>(key, value, &update, &self.key_splitter);
     }
 
 //     pub fn by_levels(&self) -> Vec<(&str, usize)> {
@@ -394,7 +392,8 @@ impl<T> Node<T> {
                         return Some((key_matched_len, cur_node))
                     },
                 NodeData::Interior(children) =>
-                    match longest_common_prefix(key_query, &cur_node.key_part, split_at_all_chars) {
+                    // FIXME generify split_at_all_chars
+                    match longest_common_prefix(key_query, &cur_node.key_part, &split_at_all_chars) {
                         // The queried key was fully a prefix of the current node, so return the whole subtrie.
                         LcpResult { common_prefix: _, left_rest: "", right_rest: _ } =>
                             return Some((key_matched_len, cur_node)),
@@ -428,10 +427,9 @@ impl<T> Node<T> {
     // }
 
     // TODO: Replace with `entry` API, using `Entry` and `InsertAction`.
-    pub fn insert_or_update<'a, const IS_ROOT: bool, U, F, I>(&mut self, insert_key: &str, insert_value: T, update: &impl Fn(&mut T) -> U, splitter: &F) -> InsertOrUpdateResult<T, U>
+    pub fn insert_or_update<'a, const IS_ROOT: bool, U, F>(&mut self, insert_key: &str, insert_value: T, update: &impl Fn(&mut T) -> U, splitter: &F) -> InsertOrUpdateResult<T, U>
     where
-        F: Fn(&'_ str) -> I,
-        I: Iterator<Item = &'a str>,
+        F: for <'any> SplitInclusive<'any>
     {
         let split_result = longest_common_prefix(insert_key, &self.key_part, splitter);
         match (&mut self.data, split_result) {
@@ -458,7 +456,7 @@ impl<T> Node<T> {
                 // Try to insert into the children.
                 let mut insert_value = insert_value;
                 for child in children.iter_mut() {
-                    match child.insert_or_update::<false, U, F, I>(insert_key_rest, insert_value, update, splitter) {
+                    match child.insert_or_update::<false, U, F>(insert_key_rest, insert_value, update, &splitter) {
                         // Not successful, so try the next child.
                         InsertOrUpdateResult::NoPrefix { value } => insert_value = value,
                         // Successful (either replaced or inserted a new leaf node), so return.
@@ -737,7 +735,7 @@ impl<T> Node<T> {
             }
             for (i, child1) in children.iter().enumerate() {
                 for child2 in &children[i+1..] {
-                    let split_result = longest_common_prefix(&child1.key_part, &child2.key_part, split_at_all_chars);
+                    let split_result = longest_common_prefix(&child1.key_part, &child2.key_part, &split_at_all_chars);
                     assert!(split_result.common_prefix.is_empty(), "invariant violated: children of interior nodes must not have a common prefix\n{self:?}");
                 }
             }

@@ -1,18 +1,17 @@
 use crate::trie::Trie;
 use crate::trie::TrieNode;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct Node<'a> {
-    pub str: &'a str,
+pub struct StrCountNode<'data> {
+    pub str: &'data str,
     /// Includes the counts of the children.
     pub count: u64,
     /// Empty if this is a leaf node.
-    pub children: Vec<Node<'a>>,
+    pub children: Vec<StrCountNode<'data>>,
 }
 
-impl<'a, F> From<&'a Trie<u64, F>> for Node<'a> {
-    fn from(trie: &'a Trie<u64, F>) -> Self {
-        fn from(trie_node: &TrieNode<u64>) -> Node {
+impl<'data, F> From<&'data Trie<u64, F>> for StrCountNode<'data> {
+    fn from(trie: &'data Trie<u64, F>) -> Self {
+        fn from(trie_node: &TrieNode<u64>) -> StrCountNode {
             let mut count = trie_node.value().copied().unwrap_or(0);
             let mut children = Vec::new();
             for trie_node in trie_node.children() {
@@ -20,7 +19,7 @@ impl<'a, F> From<&'a Trie<u64, F>> for Node<'a> {
                 count += node.count;
                 children.push(node);
             }
-            Node {
+            StrCountNode {
                 str: trie_node.key_part(),
                 count,
                 children,
@@ -30,7 +29,7 @@ impl<'a, F> From<&'a Trie<u64, F>> for Node<'a> {
     }
 }
 
-impl<'data> Node<'data> {
+impl<'data> StrCountNode<'data> {
     pub fn height(&self) -> usize {
         let mut max_depth = 0;
         for child in self.children.iter() {
@@ -41,11 +40,11 @@ impl<'data> Node<'data> {
 
     pub fn retain<F>(&mut self, mut f: F)
     where
-        F: FnMut(&Node<'data>) -> bool,
+        F: FnMut(&StrCountNode<'data>) -> bool,
     {
-        fn retain<'data, F>(node: &mut Node<'data>, f: &mut F)
+        fn retain<'data, F>(node: &mut StrCountNode<'data>, f: &mut F)
         where
-            F: FnMut(&Node<'data>) -> bool,
+            F: FnMut(&StrCountNode<'data>) -> bool,
         {
             for child in node.children.iter_mut() {
                 retain(child, f);
@@ -57,12 +56,12 @@ impl<'data> Node<'data> {
 
     pub fn sort_by_key<F, K>(&mut self, mut f: F)
     where
-        F: FnMut(&Node<'data>) -> K,
+        F: FnMut(&StrCountNode<'data>) -> K,
         K: Ord,
     {
-        fn sort_by_key<'data, F, K>(node: &mut Node<'data>, f: &mut F)
+        fn sort_by_key<'data, F, K>(node: &mut StrCountNode<'data>, f: &mut F)
         where
-            F: FnMut(&Node<'data>) -> K,
+            F: FnMut(&StrCountNode<'data>) -> K,
             K: Ord,
         {
             for child in node.children.iter_mut() {
@@ -75,11 +74,11 @@ impl<'data> Node<'data> {
 
     pub fn fold<F, T>(&self, init: T, mut f: F) -> T
     where
-        F: FnMut(T, &Node<'data>) -> T,
+        F: FnMut(T, &StrCountNode<'data>) -> T,
     {
-        fn fold<'data, F, T>(node: &Node<'data>, acc: T, f: &mut F) -> T
+        fn fold<'data, F, T>(node: &StrCountNode<'data>, acc: T, f: &mut F) -> T
         where
-            F: FnMut(T, &Node<'data>) -> T,
+            F: FnMut(T, &StrCountNode<'data>) -> T,
         {
             let mut acc = f(acc, node);
             for child in node.children.iter() {

@@ -5,13 +5,13 @@ The trie gives a count for each prefix of the input strings.
 
 Example:
 
-    $ cat input.txt
+    $ cat tests/inputs/simple.txt
     abc
     abd
     abe
     f
     
-    $ tc input.txt
+    $ tc tests/inputs/simple.txt
     4
       3 ab
         1 c
@@ -27,7 +27,7 @@ Example for paths:
     ./src/main.rs
     ./src/options.rs
 
-    $ find -type f | tc -d'/' -s
+    $ find -type f | tc --split-delimiter='/' --sort=count
     4 ./
       2 src/
         1 main.rs
@@ -38,10 +38,10 @@ Example for paths:
 Advanced example, combining with other UNIX tools, e.g., summing words in a directory tree:
 
     $ find -type f | xargs wc -w | head -n-1
-      42 src/main.rs
-    1337 src/options.rs
+    42 src/options.rs
+    1337 src/main.rs
 
-    $ find -type f | xargs wc -w | head -n-1 | tc -c -d'/' -s
+    $ find -type f | xargs wc -w | head -n-1 | tc --counted-input -d'/' -sc
     1379 src/
-      1337 options.rs
-      42 main.rs
+      1337 main.rs
+      42 options.rs

@@ -26,124 +26,123 @@ fn main() -> anyhow::Result<()> {
     // DEBUG
     // eprintln!("{options:#?}");
 
-    // Create empty trie.
-    // Use provided delimiter pattern to split lines into parts.
     // Since the splitter closure is part of the type of the trie, we must unfortunately
     // explicitly pull it out into a separate generic function that is then monomorphized the two
     // possible types of splitters.
     if let Some(regex) = &options.split_delimiter {
-        monomorphize_trie_splitter(RegexSplitter(regex), &options)?;
+        main_with_options(&options, RegexSplitter(regex))
     } else {
-        monomorphize_trie_splitter(SplitAtAllChars, &options)?;
+        main_with_options(&options, SplitAtAllChars)
     }
-    fn monomorphize_trie_splitter<'a>(
-        split_inclusive: impl for<'any> SplitFunction<'any>,
+}
+
+fn main_with_options(
+    options: &Options,
+    split_inclusive: impl for<'any> SplitFunction<'any>,
+) -> anyhow::Result<()> {
+    // Create empty trie.
+    // Use provided delimiter pattern to split lines into parts.
+    let mut trie = Trie::with_key_splitter(split_inclusive);
+
+    // Read lines from input and insert each into trie.
+    let input: Box<dyn io::BufRead> = if let Some(file) = &options.input {
+        Box::new(BufReader::new(File::open(file)?))
+    } else {
+        Box::new(io::stdin().lock())
+    };
+
+    for (i, line) in input.lines().enumerate() {
+        let line = line?;
+        let mut line = line.as_str();
+
+        // Optionally trim leading and trailing whitespace.
+        if options.trim_input {
+            line = line.trim();
+        }
+
+        // Optionally use counts from beginning of line.
+        let CountedLine(count, line) = if options.counted_input {
+            CountedLine::parse(line).with_context(|| format!("input line {}: expected integer count, got '{line}'", i + 1))?
+        } else {
+            CountedLine(1, line)
+        };
+
+        trie.insert_or_update(line, count, |current| *current += count);
+    }
+
+    // Convert the trie to a tree, where each subtree contains the count of all its children.
+    let mut count_tree = count_tree::StrCountNode::from(&trie);
+
+    // Filter out nodes that are below the threshold.
+    // Do this first, to speed up sorting in the next step.
+    let total_count = count_tree.count;
+    match options.min {
+        Some(Threshold::Count(threshold)) => count_tree.retain(|node| node.count >= threshold),
+        Some(Threshold::Fraction(threshold)) => count_tree.retain(|node| {
+            let fraction = ProperFraction::new(node.count, total_count)
+                .expect("single node count should always be less than total count");
+            fraction >= threshold
+        }),
+        None => {}
+    };
+
+    // Optionally sort the trie by subtree sizes or alphabetically.
+    match options.sort {
+        Some(options::SortOrder::Count) => count_tree.sort_by_key(|node| std::cmp::Reverse(node.count)),
+        Some(options::SortOrder::Alphabetical) => count_tree.sort_by_key(|node| node.str),
+        None => {}
+    };
+
+    // Write trie to output.
+    let mut output: Box<dyn io::Write> = if let Some(file) = &options.output {
+        Box::new(BufWriter::new(File::create(file)?))
+    } else {
+        Box::new(io::stdout())
+    };
+
+    fn print_tree(
+        output: &mut impl io::Write,
+        node: &count_tree::StrCountNode,
+        level: usize,
         options: &Options,
+        total_count: u64,
+        max_width: usize,
     ) -> anyhow::Result<()> {
-        let mut trie = Trie::with_key_splitter(split_inclusive);
+        let fraction = ProperFraction::new(node.count, total_count).unwrap();
 
-        // Read lines from input and insert each into trie.
-        let input: Box<dyn io::BufRead> = if let Some(file) = &options.input {
-            Box::new(BufReader::new(File::open(file)?))
+        let mut line = options.indent_with.repeat(level);
+        write!(line, "{} ", node.count)?;
+        if options.percent {
+            write!(line, "({:.1}%) ", fraction.0 * 100.0)?;
+        }
+        if options.quote {
+            write!(line, "'{}'", node.str)?;
         } else {
-            Box::new(io::stdin().lock())
-        };
-
-        for (i, line) in input.lines().enumerate() {
-            let line = line?;
-            let mut line = line.as_str();
-
-            // Optionally trim leading and trailing whitespace.
-            if options.trim_input {
-                line = line.trim();
-            }
-
-            // Optionally use counts from beginning of line.
-            let CountedLine(count, line) = if options.counted_input {
-                CountedLine::parse(line).with_context(|| format!("input line {}: expected integer count, got '{line}'", i + 1))?
-            } else {
-                CountedLine(1, line)
-            };
-
-            trie.insert_or_update(line, count, |current| *current += count);
+            write!(line, "{}", node.str)?;
+        }
+        // Put the bar right of the other information and align it.
+        if options.bar {
+            writeln!(output, "{line:max_width$} {}", unicode_bar(fraction, BAR_WIDTH))?;
+        } else {
+            writeln!(output, "{line}")?;
         }
 
-        // Convert the trie to a tree, where each subtree contains the count of all its children.
-        let mut count_tree = count_tree::Node::from(&trie);
-
-        // Filter out nodes that are below the threshold.
-        // Do this first, to speed up sorting in the next step.
-        let total_count = count_tree.count;
-        match options.min {
-            Some(Threshold::Count(threshold)) => count_tree.retain(|node| node.count >= threshold),
-            Some(Threshold::Fraction(threshold)) => count_tree.retain(|node| {
-                let fraction = ProperFraction::new(node.count, total_count)
-                    .expect("single node count should always be less than total count");
-                fraction >= threshold
-            }),
-            None => {}
-        };
-
-        // Optionally sort the trie by subtree sizes or alphabetically.
-        match options.sort {
-            Some(options::SortOrder::Count) => count_tree.sort_by_key(|node| std::cmp::Reverse(node.count)),
-            Some(options::SortOrder::Alphabetical) => count_tree.sort_by_key(|node| node.str),
-            None => {}
-        };
-
-        // Write trie to output.
-        let mut output: Box<dyn io::Write> = if let Some(file) = &options.output {
-            Box::new(BufWriter::new(File::create(file)?))
-        } else {
-            Box::new(io::stdout())
-        };
-
-        fn print_tree(
-            output: &mut impl io::Write,
-            node: &count_tree::Node,
-            level: usize,
-            options: &Options,
-            total_count: u64,
-            max_width: usize,
-        ) -> anyhow::Result<()> {
-            let fraction = ProperFraction::new(node.count, total_count).unwrap();
-
-            let mut line = options.indent_with.repeat(level);
-            write!(line, "{} ", node.count)?;
-            if options.percent {
-                write!(line, "({:.1}%) ", fraction.0 * 100.0)?;
-            }
-            if options.quote {
-                write!(line, "'{}'", node.str)?;
-            } else {
-                write!(line, "{}", node.str)?;
-            }
-            // Put the bar right of the other information and align it.
-            if options.bar {
-                writeln!(output, "{line:max_width$} {}", unicode_bar(fraction, BAR_WIDTH))?;
-            } else {
-                writeln!(output, "{line}")?;
-            }
-
-            for child in node.children.iter() {
-                print_tree(output, child, level + 1, options, total_count, max_width)?;
-            }
-            Ok(())
+        for child in node.children.iter() {
+            print_tree(output, child, level + 1, options, total_count, max_width)?;
         }
-
-        // Calculate maximum width of a line for indentation of the bar chart.
-        let mut max_width = 0;
-        max_width += count_tree.height() * options.indent_with.len(); // Indentation.
-        max_width += total_count.to_string().len() + 1; // Count and space.
-        max_width += if options.percent { 8 } else { 0 }; // Percentage, parenthesis etc. and space.
-        let max_str_len = count_tree.fold(0, |max_str_len, node| max_str_len.max(node.str.len()));
-        max_width += max_str_len;
-        max_width += if options.quote { 2 } else { 0 };
-
-        print_tree(&mut output, &count_tree, 0, options, total_count, max_width)
+        Ok(())
     }
 
-    Ok(())
+    // Calculate maximum width of a line for indentation of the bar chart.
+    let mut max_width = 0;
+    max_width += count_tree.height() * options.indent_with.len(); // Indentation.
+    max_width += total_count.to_string().len() + 1; // Count and space.
+    max_width += if options.percent { 8 } else { 0 }; // Percentage, parenthesis etc. and space.
+    let max_str_len = count_tree.fold(0, |max_str_len, node| max_str_len.max(node.str.len()));
+    max_width += max_str_len;
+    max_width += if options.quote { 2 } else { 0 };
+
+    print_tree(&mut output, &count_tree, 0, options, total_count, max_width)
 }
 
 #[derive(Debug, Clone)]

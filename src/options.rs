@@ -31,8 +31,6 @@ pub struct Options {
     #[clap(short = 'd', long, value_name = "regex")]
     pub split_delimiter: Option<Regex>,
 
-    // TODO: Option to remove the split delimiter from the output.
-
     /// Each input line starts with a count of how often to count the following string.
     /// Example: "42 foo" counts the string "foo" 42 times.
     /// [default: false]
@@ -53,7 +51,7 @@ pub struct Options {
     #[clap(short, long)]
     pub quote: bool,
 
-    /// Do not show subtries below an integer <count> or that account for less than <fraction> of the total count. [default: disabled]
+    /// Do not show subtries below an integer <count> or that account for less than <fraction> of the total count. [default: false]
     #[clap(short, long, value_name = "count|fraction")]
     pub min: Option<Threshold>,
 

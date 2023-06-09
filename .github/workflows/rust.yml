@@ -2,9 +2,11 @@ on: [push, pull_request]
 
 env:
   CARGO_TERM_COLOR: always
+  # Fail CI if there are warnings.
+  RUSTFLAGS: "-D warnings"
 
 jobs:
-  build:
+  ci:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3

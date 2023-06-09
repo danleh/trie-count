@@ -305,7 +305,7 @@ impl<T> TrieNode<T> {
         }
     }
 
-    pub fn remove_exact(&mut self, key: &str) -> Option<T> {
+    pub fn remove_exact(&mut self, _key: &str) -> Option<T> {
         // TODO: Based on `get_exact`. Maybe refactor into a common function that returns a `&mut Node<T>`?
         todo!()
     }

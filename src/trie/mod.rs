@@ -1,14 +1,11 @@
-// FIXME: Remove.
-#![allow(dead_code)]
-
-#[cfg(test)]
-mod test;
-
-mod iteration;
-
 // see https://github.com/michaelsproul/rust_radix_trie/blob/master/examples/string_frequency.rs
 // and https://github.com/miedzinski/prefix-tree
 // and https://en.wikipedia.org/wiki/Radix_tree
+
+mod iteration;
+
+#[cfg(test)]
+mod test;
 
 use crate::longest_common_prefix::*;
 
@@ -35,6 +32,14 @@ where
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.root.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.root.is_empty()
+    }
+
     pub fn insert_or_update(&mut self, key: &str, value: T, update: impl Fn(&mut T)) {
         self.root.insert_or_update::<true, ()>(key, value, &update, self.key_split_function);
     }
@@ -48,7 +53,7 @@ pub struct TrieNode<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum NodeData<T> {
+pub(crate) enum NodeData<T> {
     Leaf(T),
     Interior(Vec<TrieNode<T>>),
 }

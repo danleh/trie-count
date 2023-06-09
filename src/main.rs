@@ -16,8 +16,9 @@ use crate::unicode_bar::unicode_bar;
 mod count_tree;
 mod longest_common_prefix;
 mod options;
-mod trie;
 mod unicode_bar;
+
+pub mod trie;
 
 const BAR_WIDTH: usize = 10;
 

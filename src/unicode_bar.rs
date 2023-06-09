@@ -3,7 +3,7 @@
 
 use crate::options::ProperFraction;
 
-// Use only two different levels of "fullness" since the other characters may look slightly
+// Use only two different levels of "fullness" since the other unicode characters may look slightly
 // different depending on the font.
 const PARTIAL_BLOCKS: [&str; 3] = [" ", "▌","█"];
 // const PARTIAL_BLOCKS: [&str; 9] = [" " , "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
@@ -16,7 +16,7 @@ pub fn unicode_bar(fraction: ProperFraction, max_width: usize) -> String {
 
     let partial_width = ideal_width - full_width;
     if partial_width > 0.0 {
-        let block_index = (partial_width * PARTIAL_BLOCKS.len() as f64).floor() as usize;
+        let block_index = (partial_width * (PARTIAL_BLOCKS.len() - 1) as f64).floor() as usize;
         bar.push_str(PARTIAL_BLOCKS[block_index]);
     }
 
@@ -27,4 +27,12 @@ pub fn unicode_bar(fraction: ProperFraction, max_width: usize) -> String {
     
     debug_assert_eq!(bar.chars().count(), max_width);
     bar
+}
+
+#[test]
+fn test_bar() {
+    for i in 0..=100 {
+        let fraction = ProperFraction::new(i, 100).unwrap();
+        println!("{:3}: {}", i, unicode_bar(fraction, 10));
+    }
 }

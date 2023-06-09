@@ -11,6 +11,7 @@ pub struct LcpResult<'a> {
 // function pointer or a closure with a by-reference captured environment).
 pub trait SplitFunction<'a> : Copy {
     type Iter: Iterator<Item = &'a str>;
+
     fn split(&self, str: &'a str) -> Self::Iter;
 }
 
@@ -22,6 +23,7 @@ where
     I: Iterator<Item = &'a str>,
 {
     type Iter = I;
+
     fn split(&self, str: &'a str) -> Self::Iter {
         self(str)
     }
@@ -33,8 +35,37 @@ pub struct SplitAtAllChars;
 
 impl<'a> SplitFunction<'a> for SplitAtAllChars {
     type Iter = std::str::SplitInclusive<'a, fn(char) -> bool>;
+
     fn split(&self, str: &'a str) -> Self::Iter {
         str.split_inclusive(|_| true)
+    }
+}
+
+// Even faster implementation (about 1.5x!), but just for ASCII strings.
+#[derive(Clone, Copy)]
+pub struct SplitAtAllCharsAssumeAscii;
+
+impl<'a> SplitFunction<'a> for SplitAtAllCharsAssumeAscii {
+    type Iter = SplitAtAllCharsAssumeAsciiIter<'a>;
+
+    fn split(&self, str: &'a str) -> Self::Iter {
+        if str.is_ascii() {
+            return SplitAtAllCharsAssumeAsciiIter(str.as_bytes().iter());
+        } else {
+            panic!("SplitAtAllCharsAssumeAscii only works on ASCII strings")
+        }
+    }
+}
+
+pub struct SplitAtAllCharsAssumeAsciiIter<'a>(std::slice::Iter<'a, u8>);
+
+impl<'a> Iterator for SplitAtAllCharsAssumeAsciiIter<'a> {
+    type Item = &'a str;
+    
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        // SAFETY: We know that the input is ASCII, so each byte is a valid UTF-8 codepoint.
+        self.0.next().map(|byte| unsafe { std::str::from_utf8_unchecked(std::slice::from_ref(byte)) })
     }
 }
 
@@ -75,6 +106,23 @@ pub fn longest_common_prefix<'a>(left: &'a str, right: &'a str, splitter: impl S
         left_rest: unsafe { left.get_unchecked(difference_start_index..) },
         right_rest: unsafe { right.get_unchecked(difference_start_index..) },
     }
+}
+
+#[test]
+fn test_split_at_all_chars() {
+    let str = "foo";
+
+    let mut iter = SplitAtAllChars.split(str);
+    assert_eq!(iter.next(), Some("f"));
+    assert_eq!(iter.next(), Some("o"));
+    assert_eq!(iter.next(), Some("o"));
+    assert_eq!(iter.next(), None);
+
+    let mut iter = SplitAtAllCharsAssumeAscii.split(str);
+    assert_eq!(iter.next(), Some("f"));
+    assert_eq!(iter.next(), Some("o"));
+    assert_eq!(iter.next(), Some("o"));
+    assert_eq!(iter.next(), None);
 }
 
 #[test]

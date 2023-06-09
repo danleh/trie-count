@@ -186,7 +186,6 @@ impl<T> TrieNode<T> {
                         return Some((key_matched_len, cur_node))
                     },
                 NodeData::Interior(children) =>
-                    // FIXME generify SplitAtAllChars
                     match longest_common_prefix(key_query, &cur_node.key_part, key_split_function) {
                         // The queried key was fully a prefix of the current node, so return the whole subtrie.
                         LcpResult { common_prefix: _, left_rest: "", right_rest: _ } =>

@@ -20,16 +20,16 @@ pub struct Options {
     #[clap(short, long = "out", value_name = "file", value_hint = ValueHint::FilePath)]
     pub output: Option<PathBuf>,
 
-    /// Trim leading and trailing whitespace from each line.
-    /// [default: false]
-    #[clap(short, long)]
-    pub trim_input: bool,
-
     /// Split only at the given regex pattern.
     /// For example, -d'/|\.' is useful to build a trie of paths, splitting only at directories and file extensions.
     /// [default: split at every character]
     #[clap(short = 'd', long, value_name = "regex")]
     pub split_delimiter: Option<Regex>,
+
+    /// Trim leading and trailing whitespace from each line.
+    /// [default: false]
+    #[clap(short, long)]
+    pub trim_input: bool,
 
     /// Each input line starts with a count of how often to count the following string.
     /// Example: "42 foo" counts the string "foo" 42 times.

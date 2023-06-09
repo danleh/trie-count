@@ -1,12 +1,12 @@
-use std::marker::PhantomData;
 use std::borrow::Borrow;
+use std::marker::PhantomData;
 
 use super::Node;
 
 /// Trait for abstracting over the tracking of keys in the iteratior:
 /// Either the keys are tracked (and the current `KeyParts` stored in the `KeyStack`),
 /// or not tracked at all (in which case `KeyParts` is `()`).
-pub trait KeyStack<'trie> : Borrow<Self::KeyParts> {
+pub trait KeyStack<'trie>: Borrow<Self::KeyParts> {
     type KeyParts: ?Sized;
     fn current_key_parts(&self) -> &Self::KeyParts {
         self.borrow()
@@ -35,9 +35,10 @@ impl<'trie> KeyStack<'trie> for Vec<&'trie str> {
     }
 }
 
+
 /// Trait for abstracting over `Value`s returned by the iterator:
 /// Either both leafs and interior nodes are returned, or only leafs.
-pub trait Value<'trie, T> : Sized {
+pub trait Value<'trie, T>: Sized {
     fn from(node: &'trie Node<T>) -> Option<Self>;
 }
 
@@ -106,13 +107,12 @@ where
 }
 
 impl<T> Node<T> {
-    
     /// Generic interior pre-order depth-first traversal of the trie, configurable by `K` and `V`.
     fn internal_iter_generic<'trie, KS, V, F>(&'trie self, key_parts_stack: &mut KS, f: &mut F)
     where
         KS: KeyStack<'trie>,
         V: Value<'trie, T>,
-        F: FnMut(&KS::KeyParts, V)
+        F: FnMut(&KS::KeyParts, V),
     {
         key_parts_stack.push(&self.key_part);
         if let Some(value) = V::from(self) {
@@ -126,13 +126,19 @@ impl<T> Node<T> {
 
     /// Depth-first traversal of the trie, including interior nodes, and with key parts.
     /// The value passed to `f` is `None` for interior nodes and `Some(&T)` for leafs.
-    pub fn internal_iter_items(&self, mut f: impl FnMut(/* key_parts */ &[&str], /* value */ Option<&T>)) {
+    pub fn internal_iter_items(
+        &self,
+        mut f: impl FnMut(/* key_parts */ &[&str], /* value */ Option<&T>),
+    ) {
         self.internal_iter_generic(&mut Vec::new(), &mut f);
     }
 
     /// Depth-first traversal of the trie, _not_ including interior nodes, and with key parts.
     /// Since `f` is only called for leafs, the passed value is always a valid `&T`.
-    pub fn internal_iter_items_leafs(&self, mut f: impl FnMut(/* key_parts */ &[&str], /* value */ &T)) {
+    pub fn internal_iter_items_leafs(
+        &self,
+        mut f: impl FnMut(/* key_parts */ &[&str], /* value */ &T),
+    ) {
         self.internal_iter_generic(&mut Vec::new(), &mut f);
     }
 
@@ -159,5 +165,4 @@ impl<T> Node<T> {
     pub fn external_iter_values(&self) -> Iter<T, /* no key_parts_stack */ (), &T> {
         Iter::new(self)
     }
-
 }

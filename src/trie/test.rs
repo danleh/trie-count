@@ -1,11 +1,32 @@
 use std::{cmp::Reverse, collections::HashMap, ops::RangeInclusive};
+use std::str::FromStr;
 
 use super::*;
 
+// Utility methods for testing.
 impl<T> Node<T> {
-    // Utility functions for testing:
+    fn assert_invariants<const IS_ROOT: bool>(&self, key_split_function: impl for <'any> SplitFunction<'any>)
+    where T: std::fmt::Debug
+    {
+        if let NodeData::Interior(children) = &self.data {
+            if IS_ROOT {
+                assert!(children.is_empty() || children.len() > 1, "invariant violated: the root node must have either no child (initial empty root), or at least two children\n{self:?}");
+            } else {
+                assert!(!self.key_part.is_empty(), "invariant violated: interior nodes (except the root node) must have a non-empty key part\n{self:?}");
+                assert!(children.len() > 1, "invariant violated: interior nodes (except the empty root node) must have at least two children\n{self:?}");
+            }
+            for (i, child1) in children.iter().enumerate() {
+                for child2 in &children[i+1..] {
+                    let split_result = longest_common_prefix(&child1.key_part, &child2.key_part, key_split_function);
+                    assert!(split_result.common_prefix.is_empty(), "invariant violated: children of interior nodes must not have a common prefix\n{self:?}");
+                }
+            }
+            for child in children {
+                child.assert_invariants::<false>(key_split_function);
+            }
+        }
+    }
 
-    #[cfg(test)]
     fn to_test_string(&self) -> String
         where T: std::fmt::Debug
     {
@@ -27,7 +48,6 @@ impl<T> Node<T> {
         str_acc
     }
 
-    #[cfg(test)]
     pub fn from_test_string(str: &str) -> Self
         where T: FromStr,
               <T as FromStr>::Err: std::fmt::Debug,
@@ -86,29 +106,6 @@ impl<T> Node<T> {
 
         assert_eq!(subtries.len(), 1, "more than one root node");
         subtries.pop().unwrap().1
-    }
-
-    #[cfg(test)]
-    fn assert_invariants<const IS_ROOT: bool>(&self, key_split_function: impl for <'any> SplitFunction<'any>)
-    where T: std::fmt::Debug
-    {
-        if let NodeData::Interior(children) = &self.data {
-            if IS_ROOT {
-                assert!(children.is_empty() || children.len() > 1, "invariant violated: the root node must have either no child (initial empty root), or at least two children\n{self:?}");
-            } else {
-                assert!(!self.key_part.is_empty(), "invariant violated: interior nodes (except the root node) must have a non-empty key part\n{self:?}");
-                assert!(children.len() > 1, "invariant violated: interior nodes (except the empty root node) must have at least two children\n{self:?}");
-            }
-            for (i, child1) in children.iter().enumerate() {
-                for child2 in &children[i+1..] {
-                    let split_result = longest_common_prefix(&child1.key_part, &child2.key_part, key_split_function);
-                    assert!(split_result.common_prefix.is_empty(), "invariant violated: children of interior nodes must not have a common prefix\n{self:?}");
-                }
-            }
-            for child in children {
-                child.assert_invariants::<false>(key_split_function);
-            }
-        }
     }
 }
 

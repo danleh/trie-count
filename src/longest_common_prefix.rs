@@ -58,7 +58,7 @@ pub fn longest_common_prefix<'a>(left: &'a str, right: &'a str, split_function: 
     let mut left_last = left.as_ptr();
     let mut right_last = right.as_ptr();
     for (left_part, right_part) in left_iter.zip(right_iter) {
-        // Check that the split iterator decomposes the input without losing any parts.
+        // Ensure that the split function decomposes the input without losing any parts.
         debug_assert_eq!(left_last, left_part.as_ptr());
         debug_assert_eq!(right_last, right_part.as_ptr());
         left_last = left_part.as_bytes().as_ptr_range().end;

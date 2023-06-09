@@ -1,50 +1,52 @@
 use std::fmt::Write;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter};
+use std::io;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::BufWriter;
 
 use anyhow::Context;
 use clap::Parser;
 
-use crate::longest_common_prefix::{SplitAtAllChars, SplitFunction, RegexSplitter};
+use crate::longest_common_prefix::{RegexSplitter, SplitAtAllChars, SplitFunction};
 use crate::options::{Options, ProperFraction, Threshold};
 use crate::trie::Trie;
 use crate::unicode_bar::unicode_bar;
 
 mod count_tree;
+mod longest_common_prefix;
 mod options;
 mod trie;
 mod unicode_bar;
-mod longest_common_prefix;
 
 const BAR_WIDTH: usize = 10;
 
 fn main() -> anyhow::Result<()> {
     let options = options::Options::parse();
     // DEBUG
-    eprintln!("{options:#?}");
-    
+    // eprintln!("{options:#?}");
+
     // Create empty trie.
     // Use provided delimiter pattern to split lines into parts.
     // Since the splitter closure is part of the type of the trie, we must unfortunately
-    // explicitly pull it out into a separate generic function that is then monomorphized for each
-    // of the two possible types of splitters.
+    // explicitly pull it out into a separate generic function that is then monomorphized the two
+    // possible types of splitters.
     if let Some(regex) = &options.split_delimiter {
         monomorphize_trie_splitter(RegexSplitter(regex), &options)?;
     } else {
         monomorphize_trie_splitter(SplitAtAllChars, &options)?;
     }
-    fn monomorphize_trie_splitter<'a, F>(split_inclusive: F, options: &Options) -> anyhow::Result<()>
-    where
-        F: for <'any> SplitFunction<'any>,
-    {
+    fn monomorphize_trie_splitter<'a>(
+        split_inclusive: impl for<'any> SplitFunction<'any>,
+        options: &Options,
+    ) -> anyhow::Result<()> {
         let mut trie = Trie::with_key_splitter(split_inclusive);
 
-        // Read lines from input and insert intro trie.
+        // Read lines from input and insert each into trie.
         let input: Box<dyn io::BufRead> = if let Some(file) = &options.input {
             Box::new(BufReader::new(File::open(file)?))
         } else {
-            let stdin = Box::leak(Box::new(io::stdin()));
-            Box::new(stdin.lock())
+            Box::new(io::stdin().lock())
         };
 
         for (i, line) in input.lines().enumerate() {
@@ -58,9 +60,7 @@ fn main() -> anyhow::Result<()> {
 
             // Optionally use counts from beginning of line.
             let CountedLine(count, line) = if options.counted_input {
-                CountedLine::parse(line).with_context(|| {
-                    format!("input line {}: expected integer count, got '{line}'", i + 1)
-                })?
+                CountedLine::parse(line).with_context(|| format!("input line {}: expected integer count, got '{line}'", i + 1))?
             } else {
                 CountedLine(1, line)
             };
@@ -72,14 +72,19 @@ fn main() -> anyhow::Result<()> {
         let mut count_tree = count_tree::Node::from(&trie);
 
         // Filter out nodes that are below the threshold.
+        // Do this first, to speed up sorting in the next step.
         let total_count = count_tree.count;
         match options.min {
             Some(Threshold::Count(threshold)) => count_tree.retain(|node| node.count >= threshold),
-            Some(Threshold::Fraction(threshold)) => count_tree.retain(|node| ProperFraction::new(node.count, total_count).unwrap() >= threshold),
+            Some(Threshold::Fraction(threshold)) => count_tree.retain(|node| {
+                let fraction = ProperFraction::new(node.count, total_count)
+                    .expect("single node count should always be less than total count");
+                fraction >= threshold
+            }),
             None => {}
         };
 
-        // Optionally sort by subtree sizes.
+        // Optionally sort the trie by subtree sizes or alphabetically.
         match options.sort {
             Some(options::SortOrder::Count) => count_tree.sort_by_key(|node| std::cmp::Reverse(node.count)),
             Some(options::SortOrder::Alphabetical) => count_tree.sort_by_key(|node| node.str),

@@ -3,6 +3,9 @@ use std::str::FromStr;
 
 use super::*;
 
+const LEVEL_INDENTATION: &str = "  ";
+const KEY_VALUE_DELIMITER: &str = ":";
+
 // Utility methods for testing.
 impl<T> TrieNode<T> {
     fn assert_invariants<const IS_ROOT: bool>(&self, key_split_function: impl for <'any> SplitFunction<'any>)
@@ -36,11 +39,11 @@ impl<T> TrieNode<T> {
         while let Some((key_parts, maybe_value)) = iter.next() {
             let level = key_parts.len() - 1;
             for _ in 0..level {
-                str_acc.push_str(TEST_INDENT);
+                str_acc.push_str(LEVEL_INDENTATION);
             }
-            write!(str_acc, "{:?}", key_parts.last().unwrap()).unwrap();
+            write!(str_acc, "\"{}\"", key_parts.last().unwrap()).unwrap();
             if let Some(value) = maybe_value { // Leaf.
-                write!(str_acc, "{TEST_DELIM}{value:?}").unwrap();
+                write!(str_acc, "{KEY_VALUE_DELIMITER}{value:?}").unwrap();
             }
             str_acc.push('\n');
         }
@@ -58,12 +61,12 @@ impl<T> TrieNode<T> {
                 <T as FromStr>::Err: std::fmt::Debug
         {
             let mut level = 0;
-            while let Some(rest) = line.strip_prefix(TEST_INDENT) {
+            while let Some(rest) = line.strip_prefix(LEVEL_INDENTATION) {
                 line = rest;
                 level += 1;
             }
 
-            let (key_part, value) = match line.rsplit_once(TEST_DELIM) {
+            let (key_part, value) = match line.rsplit_once(KEY_VALUE_DELIMITER) {
                 Some((key_part, value_str)) => {
                     let value: T = value_str.parse().unwrap();
                     (key_part, Some(value))
@@ -138,9 +141,6 @@ fn test_iter_lending() {
     assert_eq!(iter.next(), Some((&["foo", ""][..], &3)));
     assert_eq!(iter.next(), None);
 }
-
-const TEST_INDENT: &str = "  ";
-const TEST_DELIM: &str = ":";
 
 
 #[test]
@@ -429,11 +429,15 @@ fn test_directory_tree() {
     for entry in walkdir::WalkDir::new(".") {
         let entry = entry.unwrap();
         let path = entry.path();
-        let str = path.to_string_lossy();
+        let mut str = path.to_string_lossy().to_string();
         if str.contains(".git") || str.contains("target") {
             continue;
         }
-        root.insert::<true>(&str, (), SplitAtAllChars);
+        // Ensure directories end with a slash.
+        if path.is_dir() && !str.ends_with(std::path::MAIN_SEPARATOR) {
+            str.push(std::path::MAIN_SEPARATOR);
+        }
+        root.insert::<true>(&str, (), RegexSplitter(&regex::Regex::new(r"[/\\\.]").unwrap()));
     }
 
     root.sort_by_key();

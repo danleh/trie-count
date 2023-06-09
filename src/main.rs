@@ -1,18 +1,12 @@
-#![feature(pattern)]
-
-// #![feature(type_alias_impl_trait)]
-// #![feature(return_position_impl_trait_in_trait)]
-
 use std::fmt::Write;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter};
-use std::str::pattern::Pattern;
 
 use anyhow::Context;
 use clap::Parser;
 use regex::Regex;
 
-use crate::longest_common_prefix::{split_at_all_chars};
+use crate::longest_common_prefix::{split_at_all_chars, SplitInclusive};
 use crate::options::{Options, ProperFraction, Threshold};
 use crate::trie::Trie;
 use crate::unicode_bar::unicode_bar;
@@ -25,9 +19,10 @@ mod longest_common_prefix;
 
 const BAR_WIDTH: usize = 10;
 
+#[derive(Clone, Copy)]
 struct RegexSplitter<'r>(&'r Regex);
 
-impl<'a, 'r> crate::longest_common_prefix::SplitInclusive<'a> for RegexSplitter<'r> {
+impl<'a, 'r> SplitInclusive<'a> for RegexSplitter<'r> {
     type Iter = std::str::SplitInclusive<'a, &'r Regex>;
     fn call(&self, str: &'a str) -> Self::Iter {
         str.split_inclusive(self.0)
@@ -45,29 +40,13 @@ fn main() -> anyhow::Result<()> {
     // explicitly pull it out into a separate generic function that is then monomorphized for each
     // of the two possible types of splitters.
     if let Some(regex) = &options.split_delimiter {
-        // let regex: &'static Regex = &*Box::leak(Box::new(regex.clone()));
-
-        // fn constrain<'any, F, I, O>(f: F) -> O
-        // where
-        //     F: Fn(&'any str) -> I,
-        //     I: Iterator<Item = &'any str>,
-        //     O: SplitInclusive<'any, Iter = I>,
-        // {
-        //     f
-        // }
-
-        monomorphize_trie_splitter(
-            RegexSplitter(regex),
-            // constrain(
-            //     |str: &str| str.split_inclusive(regex)
-            // ), 
-            &options)?;
+        monomorphize_trie_splitter(RegexSplitter(regex), &options)?;
     } else {
         monomorphize_trie_splitter(split_at_all_chars, &options)?;
     }
     fn monomorphize_trie_splitter<'a, F>(split_inclusive: F, options: &Options) -> anyhow::Result<()>
     where
-        F: for <'any> crate::longest_common_prefix::SplitInclusive<'any>,
+        F: for <'any> SplitInclusive<'any>,
     {
         let mut trie = Trie::with_key_splitter(split_inclusive);
 

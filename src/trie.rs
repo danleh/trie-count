@@ -58,7 +58,7 @@ impl<T, F> Trie<T, F> {
     where
         F: for <'any> SplitInclusive<'any>,
     {
-        self.root.insert_or_update::<true, (), F>(key, value, &update, &self.key_splitter);
+        self.root.insert_or_update::<true, (), F>(key, value, &update, self.key_splitter);
     }
 
 //     pub fn by_levels(&self) -> Vec<(&str, usize)> {
@@ -427,7 +427,7 @@ impl<T> Node<T> {
     // }
 
     // TODO: Replace with `entry` API, using `Entry` and `InsertAction`.
-    pub fn insert_or_update<'a, const IS_ROOT: bool, U, F>(&mut self, insert_key: &str, insert_value: T, update: &impl Fn(&mut T) -> U, splitter: &F) -> InsertOrUpdateResult<T, U>
+    pub fn insert_or_update<'a, const IS_ROOT: bool, U, F>(&mut self, insert_key: &str, insert_value: T, update: &impl Fn(&mut T) -> U, splitter: F) -> InsertOrUpdateResult<T, U>
     where
         F: for <'any> SplitInclusive<'any>
     {
@@ -456,7 +456,7 @@ impl<T> Node<T> {
                 // Try to insert into the children.
                 let mut insert_value = insert_value;
                 for child in children.iter_mut() {
-                    match child.insert_or_update::<false, U, F>(insert_key_rest, insert_value, update, &splitter) {
+                    match child.insert_or_update::<false, U, F>(insert_key_rest, insert_value, update, splitter) {
                         // Not successful, so try the next child.
                         InsertOrUpdateResult::NoPrefix { value } => insert_value = value,
                         // Successful (either replaced or inserted a new leaf node), so return.

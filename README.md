@@ -59,19 +59,26 @@ For more options (e.g., filtering out subtries with a count below a threshold) s
 
 ## Installation / Building from Source
 
-(Currently requires a nightly Rust toolchain because of the unstable `pattern` feature of the `regex` crate.
-Feel free to contribute a stable replacement.)
-
-```
-rustup toolchain install nightly
-```
+Get the source code:
 ```
 git clone https://github.com/danleh/trie-count.git
 cd trie-count
+```
+
+Get the Rust installer from https://rustup.rs/ and install a nightly toolchain.
+(Currently nightly is required because of the unstable `pattern` feature of the `regex` crate.
+Feel free to contribute a stable replacement.)
+```
+rustup toolchain install nightly
+```
+
+Build with optimizations and install locally:
+```
 cargo +nightly install --path .
 ```
+
+Should now work:
 ```
-# Should now be installed per user:
 tc --help
 ```
 

@@ -1,8 +1,9 @@
 # `tc`: Trie Count Utility
 
-A small command line utility that takes a list of strings as input and produces a [trie (prefix tree)](https://en.wikipedia.org/wiki/Trie) as output.
+A small command-line utility that takes a list of strings as input and produces a [trie (prefix tree)](https://en.wikipedia.org/wiki/Trie) as output.
 The trie associates a count with each prefix in the input lines (i.e., shows how common a particular prefix is).
-I find it useful for quick data exploration.
+It's useful for quick data exploration.
+One can iteratively explore the most common prefixes, in particular when viewing the output in an editor with indentation-based folding (e.g., VS Code).
 
 ## Usage Examples
 
